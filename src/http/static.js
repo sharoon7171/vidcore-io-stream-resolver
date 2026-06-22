@@ -9,6 +9,7 @@ const assets = {
   '/index.html': ['index.html', 'text/html; charset=utf-8'],
   '/style.css': ['style.css', 'text/css; charset=utf-8'],
   '/player.js': ['player.js', 'application/javascript; charset=utf-8'],
+  '/hls.min.js': ['hls.min.js', 'application/javascript; charset=utf-8'],
 };
 
 export function serveStatic(pathname, res) {

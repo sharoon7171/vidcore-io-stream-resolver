@@ -6,13 +6,13 @@
   <meta name="description" content="Resolve VidCore streams by TMDB movie or TV ID. Play in-browser or copy links for VLC and MPV.">
   <title>VidCore HLS Stream Resolver</title>
   <link rel="stylesheet" href="/style.css">
-  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.20/dist/hls.min.js"></script>
+  <script src="/hls.min.js"></script>
 </head>
 <body>
   <div class="app">
     <header class="top">
       <h1 class="top__title">VidCore HLS Stream Resolver</h1>
-      <p class="top__desc">Enter a TMDB movie or TV ID to resolve the HLS playlist, probe all servers, and play the first working stream from <a href="https://vidcore.net" target="_blank" rel="noopener">vidcore.net</a>.</p>
+      <p class="top__desc">Resolve the exact stream URL from <a href="https://vidcore.net" target="_blank" rel="noopener">vidcore.net</a>. Orbit, Mars, and Horizon play direct; Premiere 4K and Prime use the local proxy for referer only.</p>
     </header>
 
     <section class="card">
@@ -65,7 +65,7 @@
       <div class="card">
         <h2 id="title" class="stream-title">Stream</h2>
         <div class="player">
-          <video id="vid" controls playsinline preload="auto"></video>
+          <div id="player"><video id="video" controls playsinline></video></div>
         </div>
       </div>
 

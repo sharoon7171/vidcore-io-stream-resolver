@@ -8,6 +8,7 @@
     "node": ">=20"
   },
   "dependencies": {
-    "happy-dom": "^20.10.6"
+    "happy-dom": "^20.10.6",
+    "undici": "^7.28.0"
   }
 }

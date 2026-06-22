@@ -27,7 +27,7 @@ export async function route(req, res) {
 
   try {
     if (pathname === '/api/hls') {
-      await serve(res, searchParams, origin);
+      await serve(req, res, searchParams, origin);
       return;
     }
 

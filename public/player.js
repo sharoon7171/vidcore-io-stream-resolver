@@ -4,15 +4,6 @@ const TV_ID = '44217';
 const TV_SEASON = '1';
 const TV_EPISODE = '1';
 
-const HLS_OPTS = {
-  maxBufferLength: 8,
-  maxMaxBufferLength: 16,
-  backBufferLength: 0,
-  startFragPrefetch: true,
-  enableWorker: true,
-  maxInitialBitrate: 350000,
-};
-
 const $ = (id) => document.getElementById(id);
 
 const form = $('form');
@@ -26,11 +17,11 @@ const seasonIn = $('season');
 const episodeIn = $('episode');
 const panel = $('out');
 const heading = $('title');
-const vid = $('vid');
+const video = $('video');
 const err = $('err');
 const btn = form.querySelector('button');
 const rawOut = $('direct');
-const relayOut = $('proxy');
+const proxyOut = $('proxy');
 const vlcOut = $('vlc');
 const mpvOut = $('mpv');
 const timing = $('timing');
@@ -40,10 +31,12 @@ const tTotal = $('t-total');
 const serversEl = $('servers');
 
 let hls = null;
+let gen = 0;
 let timer = null;
 let lastLabel = '';
 let lastServers = [];
 let lastActive = '';
+let playing = false;
 
 function fmtMs(ms) {
   return ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(2)}s`;
@@ -121,40 +114,107 @@ function mpvCmd(url, name) {
   return `mpv --referrer='${REF}' --force-media-title="${name.replace(/"/g, '\\"')}" "${url}"`;
 }
 
-function hlsErr(data) {
-  if (data.details) return data.details;
-  const code = data.response?.code;
-  if (code && (code < 200 || code >= 300)) return `HTTP ${code}`;
-  return data.type || 'playback error';
+function stop() {
+  gen += 1;
+  if (hls) {
+    hls.destroy();
+    hls = null;
+  }
+  video.pause();
+  video.removeAttribute('src');
+  video.load();
 }
 
-function stop() {
-  if (!hls) return;
-  hls.destroy();
-  hls = null;
+function play(entry, clock) {
+  stop();
+  const id = gen;
+  const source = entry.proxy ? entry.play : entry.url;
+  if (Boolean(entry.proxy) !== source.includes('/api/hls')) {
+    return Promise.reject(new Error('invalid play route'));
+  }
+  const live = () => id === gen;
+
+  return new Promise((resolve, reject) => {
+    let cleaned = false;
+    const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
+      video.removeEventListener('playing', onPlaying);
+      video.removeEventListener('error', onVideoError);
+    };
+
+    const done = () => {
+      if (!live()) return;
+      cleanup();
+      err.hidden = true;
+      clock?.markPlay();
+      resolve();
+    };
+
+    const fail = (message) => {
+      if (!live()) return;
+      cleanup();
+      reject(new Error(message));
+    };
+
+    const onPlaying = () => done();
+    const onVideoError = () => fail('playback failed');
+
+    video.addEventListener('playing', onPlaying);
+    video.addEventListener('error', onVideoError);
+
+    if (Hls.isSupported()) {
+      let started = false;
+      hls = new Hls({ enableWorker: true, startFragPrefetch: true });
+      hls.on(Hls.Events.ERROR, (_, data) => {
+        if (data.fatal) fail(data.details || 'playback failed');
+      });
+      hls.on(Hls.Events.FRAG_BUFFERED, () => {
+        if (!live() || started) return;
+        started = true;
+        video.play().catch(() => {});
+      });
+      hls.attachMedia(video);
+      hls.loadSource(source);
+      return;
+    }
+
+    if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      video.src = source;
+      video.addEventListener(
+        'canplay',
+        () => {
+          if (live()) video.play().catch(() => {});
+        },
+        { once: true },
+      );
+      return;
+    }
+
+    fail('HLS not supported');
+  });
 }
 
 function serverByName(name) {
-  return lastServers.find((entry) => entry.name === name && entry.ok);
+  return lastServers.find((entry) => entry.name === name);
 }
 
-function bindExports(title, m3u8, relay) {
-  lastLabel = title;
-  rawOut.value = m3u8;
-  relayOut.value = relay;
-  vlcOut.value = vlcCmd(m3u8);
-  mpvOut.value = mpvCmd(m3u8, title);
+function bindExports(entry) {
+  rawOut.value = entry.url;
+  proxyOut.value = entry.proxy ? entry.play : '';
+  proxyOut.closest('li').hidden = !entry.proxy;
+  vlcOut.value = vlcCmd(entry.url);
+  mpvOut.value = mpvCmd(entry.url, lastLabel);
 }
 
 function renderServers(servers, active) {
-  const available = servers.filter((entry) => entry.ok && entry.relay);
-  serversEl.innerHTML = available
+  serversEl.innerHTML = servers
     .map((entry) => {
       const picked = entry.name === active ? ' badge--active' : '';
-      return `<button type="button" class="badge${picked}" data-name="${entry.name}"><span class="badge__name">${entry.name}</span><span class="badge__ms">${fmtMs(entry.ms)}</span></button>`;
+      return `<button type="button" class="badge${picked}" data-name="${entry.name}"><span class="badge__name">${entry.name}</span><span class="badge__tag">${entry.proxy ? 'proxy' : 'direct'}</span><span class="badge__ms">${fmtMs(entry.ms)}</span></button>`;
     })
     .join('');
-  serversEl.closest('.card').hidden = available.length === 0;
+  serversEl.closest('.card').hidden = servers.length === 0;
 }
 
 function selectServer(name) {
@@ -163,56 +223,8 @@ function selectServer(name) {
   lastActive = name;
   heading.textContent = `${lastLabel} · ${name}`;
   renderServers(lastServers, lastActive);
-  bindExports(lastLabel, entry.url, entry.relay);
+  bindExports(entry);
   return entry;
-}
-
-function waitFirstFrame(clock, onError) {
-  return new Promise((resolve, reject) => {
-    vid.addEventListener('loadeddata', () => {
-      clock?.markPlay();
-      resolve();
-    }, { once: true });
-    vid.addEventListener('error', () => reject(new Error('playback error')), { once: true });
-    if (onError) onError(reject);
-  });
-}
-
-async function play(relay, clock) {
-  stop();
-  vid.removeAttribute('src');
-  vid.load();
-
-  if (window.Hls?.isSupported()) {
-    hls = new Hls(HLS_OPTS);
-    hls.loadSource(relay);
-    hls.attachMedia(vid);
-    hls.on(Hls.Events.MANIFEST_PARSED, () => vid.play().catch(() => {}));
-    await waitFirstFrame(clock, (reject) => {
-      hls.on(Hls.Events.ERROR, (_, data) => {
-        if (!data.fatal) return;
-        reject(new Error(hlsErr(data)));
-      });
-    });
-    return;
-  }
-
-  if (vid.canPlayType('application/vnd.apple.mpegurl')) {
-    vid.src = relay;
-    vid.play().catch(() => {});
-    await waitFirstFrame(clock);
-    return;
-  }
-
-  throw new Error('HLS playback is not supported in this browser. Use VLC or MPV.');
-}
-
-function bootServer(entry, label, clock) {
-  heading.textContent = `${label} · ${entry.name}`;
-  lastActive = entry.name;
-  bindExports(label, entry.url, entry.relay);
-  renderServers(lastServers, entry.name);
-  play(entry.relay, clock).catch(showErr);
 }
 
 function syncType() {
@@ -249,7 +261,6 @@ async function pipeNdjson(res, clock) {
   const reader = res.body.getReader();
   const dec = new TextDecoder();
   let buf = '';
-  let boot = false;
 
   while (true) {
     const { done, value } = await reader.read();
@@ -268,26 +279,18 @@ async function pipeNdjson(res, clock) {
       }
       if (evt.event === 'server') {
         lastServers.push(evt.server);
-        if (!boot) {
-          boot = true;
+        renderServers(lastServers, lastActive);
+        if (!playing) {
+          playing = true;
           clock.markResolve();
-          bootServer(evt.server, lastLabel, clock);
-        } else {
-          renderServers(lastServers, lastActive);
-        }
-      }
-      if (evt.event === 'done') {
-        lastServers = evt.servers;
-        selectServer(evt.server);
-        if (!boot) {
-          clock.markResolve();
-          await play(serverByName(evt.server).relay, clock);
+          selectServer(evt.server.name);
+          play(evt.server, clock).catch((e) => showErr(e.message));
         }
       }
     }
   }
 
-  if (!boot && !lastServers.length) throw new Error('no servers returned');
+  if (!lastServers.length) throw new Error('no servers returned');
 }
 
 document.querySelectorAll('[data-copy]').forEach((node) => {
@@ -313,7 +316,7 @@ serversEl.addEventListener('click', async (event) => {
   clock.markResolve();
   err.hidden = true;
   try {
-    await play(entry.relay, clock);
+    await play(entry, clock);
   } catch (e) {
     showErr(e.message);
   }
@@ -330,6 +333,7 @@ form.addEventListener('submit', async (event) => {
   stop();
   lastServers = [];
   lastActive = '';
+  playing = false;
   const clock = startTimer();
   try {
     const res = await fetch(`/api/resolve?${queryParams()}`);

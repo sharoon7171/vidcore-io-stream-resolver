@@ -1,17 +1,14 @@
 import { fetchEmbed } from '../vidcore/page.js';
 import { createResolverFetch } from '../vidcore/session.js';
 import { runResolver } from '../vm/runtime.js';
-import { relayLink } from '../relay/link.js';
+import { needsProxy, playUrl } from '../relay/link.js';
+import { warmProxy } from '../relay/warm.js';
 import { unlockServer } from './stream.js';
 import { pool } from './pool.js';
 
 function listActive(servers) {
   const outer = servers.at(-1);
   return outer ? outer.filter((entry) => entry?.data) : [];
-}
-
-function sortProbes(entries) {
-  return [...entries].sort((a, b) => (a.ok === b.ok ? a.ms - b.ms : a.ok ? -1 : 1));
 }
 
 async function prepare(input) {
@@ -39,9 +36,12 @@ async function probeOne(server, sessionFetch, vmCtx, origin) {
   const ms = () => Date.now() - started;
   try {
     const url = await unlockServer(server, sessionFetch, vmCtx);
-    return { name: server.name, ok: true, ms: ms(), url, relay: relayLink(origin, url) };
+    const proxy = needsProxy(url);
+    if (proxy) warmProxy(url).catch(() => {});
+    const play = playUrl(origin, url);
+    return { name: server.name, ok: true, ms: ms(), url, play, proxy };
   } catch (err) {
-    return { name: server.name, ok: false, ms: ms(), error: err.message };
+    return { name: server.name, ok: false, ms: ms() };
   }
 }
 
@@ -57,17 +57,15 @@ export async function* stream(input, origin) {
   const { embed, sessionFetch, vmCtx, targets } = prepared;
   yield { event: 'meta', title: embed.meta.title, year: embed.meta.year };
 
-  const probes = [];
+  let found = false;
+
   for await (const hit of pool(targets, (server) => probeOne(server, sessionFetch, vmCtx, origin), targets.length)) {
-    probes.push(hit.value);
-    if (hit.value.ok) yield { event: 'server', server: hit.value };
+    if (!hit.value.ok) continue;
+    found = true;
+    yield { event: 'server', server: hit.value };
   }
 
-  const ok = sortProbes(probes).filter((entry) => entry.ok);
-  if (!ok.length) {
+  if (!found) {
     yield { event: 'error', stage: 'resolve', error: 'no working server' };
-    return;
   }
-
-  yield { event: 'done', server: ok[0].name, servers: ok };
 }
