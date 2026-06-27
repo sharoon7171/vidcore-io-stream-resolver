@@ -21,7 +21,7 @@ const video = $('video');
 const err = $('err');
 const btn = form.querySelector('button');
 const rawOut = $('direct');
-const proxyOut = $('proxy');
+const browserOut = $('browser');
 const vlcOut = $('vlc');
 const mpvOut = $('mpv');
 const timing = $('timing');
@@ -201,8 +201,7 @@ function serverByName(name) {
 
 function bindExports(entry) {
   rawOut.value = entry.url;
-  proxyOut.value = entry.proxy ? entry.play : '';
-  proxyOut.closest('li').hidden = !entry.proxy;
+  browserOut.value = entry.play;
   vlcOut.value = vlcCmd(entry.url);
   mpvOut.value = mpvCmd(entry.url, lastLabel);
 }
@@ -211,7 +210,7 @@ function renderServers(servers, active) {
   serversEl.innerHTML = servers
     .map((entry) => {
       const picked = entry.name === active ? ' badge--active' : '';
-      return `<button type="button" class="badge${picked}" data-name="${entry.name}"><span class="badge__name">${entry.name}</span><span class="badge__tag">${entry.proxy ? 'proxy' : 'direct'}</span><span class="badge__ms">${fmtMs(entry.ms)}</span></button>`;
+      return `<button type="button" class="badge${picked}" data-name="${entry.name}"><span class="badge__name">${entry.name}</span><span class="badge__ms">${fmtMs(entry.ms)}</span></button>`;
     })
     .join('');
   serversEl.closest('.card').hidden = servers.length === 0;

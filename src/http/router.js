@@ -1,6 +1,6 @@
 import { serve } from '../relay/hls.js';
-import { stream } from '../resolve/run.js';
 import { parseInput } from '../resolve/input.js';
+import { stream } from '../resolve/run.js';
 import { serveStatic } from './static.js';
 
 const cors = { 'Access-Control-Allow-Origin': '*' };
@@ -33,12 +33,18 @@ export async function route(req, res) {
 
     if (pathname === '/api/resolve') {
       try {
-        await ndjson(res, stream(parseInput({
-          type: searchParams.get('type'),
-          id: searchParams.get('id'),
-          season: searchParams.get('season'),
-          episode: searchParams.get('episode'),
-        }), origin));
+        await ndjson(
+          res,
+          stream(
+            parseInput({
+              type: searchParams.get('type'),
+              id: searchParams.get('id'),
+              season: searchParams.get('season'),
+              episode: searchParams.get('episode'),
+            }),
+            origin,
+          ),
+        );
       } catch (err) {
         json(res, 400, { ok: false, stage: 'input', error: err.message });
       }

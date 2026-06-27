@@ -2,34 +2,35 @@ export function patchPlayerChunk(source) {
   return source
     .replace(/=o\(7358\)/g, '=void 0')
     .replace(/o\(7358\);/g, 'void 0;')
-    .replace('at[c8(2386)]=cU', 'globalThis.__vidcoreCU=cU,globalThis.__vidcoreC4=c4,globalThis.__vidcoreC3=c3,globalThis.__vidcoreC2=c2,at[c8(2386)]=cU')
+    .replace('if(!cF())return', 'if(!1)return')
+    .replace('if(!cU())return!1', 'if(!1)return!1')
     .replace(
-      'async function aw(t,e,o){return ae(6,arguments,{[c6(672)]:[aL],[c6(2647)]:void 0},void 0,new.target,this)}',
-      'async function __vidcoreAwImpl(t,e,o){try{(globalThis.__awCalls=globalThis.__awCalls||[]).push(Array.from(arguments))}catch(_){};return ae(6,arguments,{[c6(672)]:[aL],[c6(2647)]:void 0},void 0,new.target,this)}globalThis.__vidcoreAw=__vidcoreAwImpl;async function aw(t,e,o){return __vidcoreAwImpl(t,e,o)}',
-    )
-    .replace('if(!a2())return', 'if(!1)return')
-    .replace('let a2=()=>{', 'let a2=()=>!0;let __a2=()=>{')
-    .replace('let a1=()=>{', 'let a1=()=>!0;let __a1=()=>{')
-    .replace('function aM(t,e){return ae(7,', 'function aM(t,e){globalThis.__vidcoreLastCtx=t;return ae(7,')
-    .replace(
-      'if(!W[c$(o._0x59a42e,"0oNq")](n,c0(o._0x4e9faf,"(o*h"))||W[c4(1333)](n,c1(o._0x24e13c,o._0x48a1f9)))return null;',
-      '',
+      /function u\(t\)\{if\(t in (\w+)\)return \1\[t\];if\(t in (\w+)\)return \2\[t\];throw Error\(t\)\}/g,
+      'function u(t){if(t in $1)return $1[t];if(t in $2)return $2[t];if(typeof globalThis!=="undefined"&&t in globalThis)return globalThis[t];throw Error("missing:"+t)}',
     )
     .replace(
-      'function a$(){return ae(8,arguments,void 0,void 0,new.target,this)}',
-      'function __vidcoreAe8Impl(){return ae(8,arguments,void 0,void 0,new.target,this)}globalThis.__vidcoreAe8=__vidcoreAe8Impl;function a$(){return __vidcoreAe8Impl()||!0}',
+      'a(w in r?r[w]:w in ch?ch[w]:void 0)',
+      'a(w in r?r[w]:w in ch?ch[w]:typeof globalThis!=="undefined"&&w in globalThis?globalThis[w]:void 0)',
     )
     .replace(
-      'async function aA(t,e){return t&&Object[c6(2537)](aI,t),aT=e||{},aj(0,aq[c3(1942,"xi$a")],{})}',
-      'async function __vidcoreAAImpl(t,e){return t&&Object[c6(2537)](aI,t),aT=e||{},aj(0,aq[c3(1942,"xi$a")],{})}globalThis.__vidcoreAA=__vidcoreAAImpl;async function aA(t,e){return __vidcoreAAImpl(t,e)}',
+      'let sV=s6,sY=s6,sU=s6,sF=s6,s_=s6,s$=s7,s1=s7,s2=s7,s0=s7,s3=s7;',
+      'globalThis.__vidcoreDecodeUnsalted=s7,globalThis.__vidcoreDecodeSalted=s6;let sV=s6,sY=s6,sU=s6,sF=s6,s_=s6,s$=s7,s1=s7,s2=s7,s0=s7,s3=s7;',
     )
     .replace(
-      'function u(t){if(t in o)return o[t];if(t in t9)return t9[t];throw Error(t)}',
-      'function u(t){if(t in o)return o[t];if(t in t9)return t9[t];if(typeof globalThis!=="undefined"&&t in globalThis)return globalThis[t];throw Error("missing:"+t)}',
+      's4[sF(3314,"Y7Wc")]=cg,globalThis._0x2326ae=s4._0x2326ae',
+      's4[sF(3314,"Y7Wc")]=cg,globalThis.__vidcoreResolve=cg,globalThis._0x2326ae=s4._0x2326ae',
     )
     .replace(
-      'function u(t){if(t in o)return o[t];if(t in ag)return ag[t];throw Error(t)}',
-      'function u(t){if(t in o)return o[t];if(t in ag)return ag[t];if(typeof globalThis!=="undefined"&&t in globalThis)return globalThis[t];throw Error("missing:"+t)}',
+      's4[s$(1794)]=cY,globalThis._0x429373=s4._0x429373',
+      's4[s$(1794)]=cY,globalThis.__vidcoreInit=cY,globalThis._0x429373=s4._0x429373',
+    )
+    .replace(
+      's4[sU(2747,"QLzy")]=cB,globalThis._0x1b477e=s4._0x1b477e',
+      's4[sU(2747,"QLzy")]=cB,globalThis.__vidcoreDecrypt=cB,globalThis._0x1b477e=s4._0x1b477e',
+    )
+    .replace(
+      '.join("")}sj.from("xZ/aW~D6:U0_]EVA");',
+      '.join("")}globalThis.__vidcoreEncode=sX;sj.from("xZ/aW~D6:U0_]EVA");',
     )
     .replace(
       /let t=_recoverThisFromEnv\(([a-zA-Z0-9]+)\)/g,

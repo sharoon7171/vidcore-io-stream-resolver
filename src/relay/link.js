@@ -1,8 +1,8 @@
-const PROXY_HOST = 'anotherweather.com';
+const REFERER_HOSTS = ['shegu.org', 'anotherweather.com'];
 
-export function needsProxy(targetUrl) {
+export function needsBrowserProxy(targetUrl) {
   const host = new URL(targetUrl).hostname;
-  return host === PROXY_HOST || host.endsWith(`.${PROXY_HOST}`);
+  return REFERER_HOSTS.some((suffix) => host === suffix || host.endsWith(`.${suffix}`));
 }
 
 export function relayLink(origin, targetUrl) {
@@ -10,5 +10,5 @@ export function relayLink(origin, targetUrl) {
 }
 
 export function playUrl(origin, upstreamUrl) {
-  return needsProxy(upstreamUrl) ? relayLink(origin, upstreamUrl) : upstreamUrl;
+  return needsBrowserProxy(upstreamUrl) ? relayLink(origin, upstreamUrl) : upstreamUrl;
 }

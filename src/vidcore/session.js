@@ -1,4 +1,3 @@
-import { ua, vidcoreOrigin } from '../env.js';
 import { mergeHeaders, resolveUrl } from './headers.js';
 
 const MO_CSRF = '0qv1jDQw6mHsiQm7fDjrWm1VNq9sqm2a';
@@ -34,23 +33,24 @@ function createSessionFetch(referer, jar) {
   };
 }
 
+function isMoRequest(url) {
+  return /\/(?:u)?mo\//.test(String(url));
+}
+
 export function createResolverFetch(referer, jar) {
   const pageFetch = createSessionFetch(referer, jar);
   const nativeFetch = globalThis.fetch.bind(globalThis);
   return async (input, init = {}) => {
     const url = resolveUrl(input);
-    if (!String(url).includes('/mo/')) return pageFetch(input, init);
-    const headers = new Headers(init.headers);
+    if (!isMoRequest(url)) return pageFetch(input, init);
+    const headers = mergeHeaders(referer, init.headers, jar);
+    headers.set('accept', headers.get('accept') || '*/*');
+    headers.set('x-csrf-token', headers.get('x-csrf-token') || MO_CSRF);
+    headers.set('x-requested-with', 'XMLHttpRequest');
     const response = await nativeFetch(url, {
       ...init,
       method: init.method || 'POST',
-      headers: {
-        accept: '*/*',
-        'x-csrf-token': headers.get('x-csrf-token') || MO_CSRF,
-        'x-requested-with': 'XMLHttpRequest',
-        referer: `${vidcoreOrigin}/`,
-        'user-agent': ua,
-      },
+      headers,
       body: init.body,
     });
     storeCookies(response, jar);
