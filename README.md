@@ -40,7 +40,7 @@ If the list-MO body decrypts to a fresh server array, that replaces the list fro
 
 ### 3 · Unlock servers
 
-Each server’s `data` token unlocks one stream URL. All servers are probed at the same time (`pool` in `src/resolve/pool.js`).
+Each server’s `data` token unlocks one stream URL. Servers are probed sequentially (`src/resolve/run.js`); the site default is tried first.
 
 For each server:
 
@@ -65,7 +65,7 @@ sequenceDiagram
   V-->>R: config.url
 ```
 
-Pipeline entry point: `stream()` in `src/resolve/run.js`.
+Pipeline entry point: `stream()` in `src/resolve/run.js`. Servers are probed **one at a time** (selected server first). Each probe is one POST unlock request.
 
 ## Playback
 
@@ -74,28 +74,34 @@ Each unlocked server returns three playback fields (set in `probeOne`):
 | Field | Meaning |
 | --- | --- |
 | `url` | upstream M3U8 on the CDN |
-| `proxy` | whether the browser must use the relay |
 | `play` | URL the browser should load |
+| `proxy` | whether the browser must use the relay |
+| `referer` | whether VLC/MPV need a vidcore.net referer |
 
 ```mermaid
 flowchart TD
-  U["server.url"] --> CHECK{"hostname in\nshegu.org\nanotherweather.com?"}
-  CHECK -->|no| DIRECT["proxy = false\nplay = url"]
-  CHECK -->|yes| PROXY["proxy = true\nplay = /api/hls?url=…"]
+  U["server.url"] --> NAME{"server name"}
+  NAME -->|Orbit| DIRECT["referer = false\nproxy = false\nplay = url"]
+  NAME -->|Prime| PROXY["referer = true\nproxy = true\nplay = /api/hls?url=…"]
+  NAME -->|other| CHECK{"shegu.org\nor anotherweather.com?"}
+  CHECK -->|yes| PROXY
+  CHECK -->|no| DIRECT2["referer = false\nproxy = false\nplay = url"]
   DIRECT --> B1["Browser loads url"]
+  DIRECT2 --> B1
   PROXY --> B2["Browser loads play"]
-  U --> EXT["VLC / MPV load url\nwith referer header"]
+  U --> EXT["VLC / MPV: referer flag from API"]
 ```
 
-Hostname check: `needsBrowserProxy` in `src/relay/link.js`.
+Referer by server name: `Orbit` — no referer; `Prime` — referer required. Other servers use `REFERER_HOSTS` in `src/relay/link.js`.
 
 **Browser** — cross-origin HLS cannot send a custom referer. When `proxy` is `true`, `playUrl` wraps the M3U8 in `/api/hls?url=…`. The relay fetches upstream with `referer: {VIDCORE_ORIGIN}/`, rewrites nested playlist URIs, and pipes segments (`src/relay/hls.js`, `src/relay/cdn.js`). When `proxy` is `false`, browser loads `url` directly.
 
-**VLC / MPV** — always use `url`, not `play`. External players can set referer themselves:
+**VLC / MPV** — use `url`, not `play`. Add referer only when `referer` is `true`:
 
 ```
 vlc --http-referrer='https://vidcore.net/' "<url>"
 mpv --referrer='https://vidcore.net/' "<url>"
+vlc "<url>"
 ```
 
 ## API
@@ -121,10 +127,11 @@ Good params → `200` NDJSON (one JSON object per line):
 | `event` | Fields |
 | --- | --- |
 | `meta` | `title`, `year` |
-| `server` | `name`, `ok`, `ms`, `url`, `play`, `proxy` |
+| `serverlist` | `servers` — `{ name }[]` before probing |
+| `server` | `name`, `ok`, `ms`, and when `ok` is true: `url`, `play`, `proxy`, `referer` |
 | `error` | `stage`, `error` |
 
-Only `server` events with `ok: true` are sent.
+Every probed server emits a `server` event (`ok: true` or `ok: false`). The UI plays the first `ok: true` result.
 
 ### `GET /api/hls?url=`
 

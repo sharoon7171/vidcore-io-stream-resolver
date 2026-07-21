@@ -215,40 +215,18 @@ button.ok {
   color: var(--err);
 }
 
-.timing {
-  list-style: none;
-  margin: 14px 0 0;
-  padding: 12px 14px;
-  display: grid;
-  gap: 8px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--surface-2);
-}
-
-.timing li {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.timing__label {
-  font-size: 0.82rem;
+.play-timing {
+  margin: 0 0 10px;
+  font: 0.82rem/1.4 var(--mono);
+  font-variant-numeric: tabular-nums;
   color: var(--muted);
 }
 
-.timing__val {
-  font: 0.9rem/1.2 var(--mono);
-  font-variant-numeric: tabular-nums;
-  color: var(--text);
-}
-
-.timing__val.is-live {
+.play-timing.is-live {
   color: var(--accent);
 }
 
-.timing__val.is-done {
+.play-timing.is-done {
   color: var(--ok);
 }
 
@@ -293,6 +271,12 @@ button.ok {
   gap: 8px;
 }
 
+.servers__hint {
+  margin: -6px 0 12px;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
 .badge {
   display: inline-flex;
   align-items: center;
@@ -322,6 +306,38 @@ button.ok {
 
 .badge__name {
   font-weight: 600;
+}
+
+.badge__icon {
+  width: 1em;
+  font-weight: 700;
+  text-align: center;
+}
+
+.badge--pending {
+  opacity: 0.75;
+  cursor: wait;
+}
+
+.badge--pending .badge__icon {
+  color: var(--accent);
+}
+
+.badge--ok .badge__icon {
+  color: var(--ok);
+}
+
+.badge--fail {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.badge--fail .badge__icon {
+  color: var(--err);
+}
+
+.badge:disabled {
+  pointer-events: none;
 }
 
 .badge__tag {

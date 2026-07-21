@@ -34,7 +34,7 @@ function createSessionFetch(referer, jar) {
 }
 
 function isMoRequest(url) {
-  return /\/(?:u)?mo\//.test(String(url));
+  return /\/(?:u)?mo\//.test(String(url)) || /\/\d{10,}\/[0-9a-f-]{36}\//.test(String(url));
 }
 
 export function createResolverFetch(referer, jar) {

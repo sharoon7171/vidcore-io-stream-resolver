@@ -2,39 +2,32 @@ export function patchPlayerChunk(source) {
   return source
     .replace(/=o\(7358\)/g, '=void 0')
     .replace(/o\(7358\);/g, 'void 0;')
-    .replace('if(!cF())return', 'if(!1)return')
-    .replace('if(!cU())return!1', 'if(!1)return!1')
+    .replaceAll('if(!m_())return!1', 'if(!1)return!1')
+    .replaceAll('if(!m_())return', 'if(!1)return')
+    .replaceAll('if(!m$())return', 'if(!1)return')
     .replace(
       /function u\(t\)\{if\(t in (\w+)\)return \1\[t\];if\(t in (\w+)\)return \2\[t\];throw Error\(t\)\}/g,
       'function u(t){if(t in $1)return $1[t];if(t in $2)return $2[t];if(typeof globalThis!=="undefined"&&t in globalThis)return globalThis[t];throw Error("missing:"+t)}',
     )
     .replace(
-      'a(w in r?r[w]:w in ch?ch[w]:void 0)',
-      'a(w in r?r[w]:w in ch?ch[w]:typeof globalThis!=="undefined"&&w in globalThis?globalThis[w]:void 0)',
+      'let iY=mm,iU=mm,i_=mm,i$=mm,i1=mm,i2=i9,i0=i9,i4=i9,i5=i9,i3=i9;',
+      'globalThis.__vidcoreDecodeSalted=mm,globalThis.__vidcoreDecodeUnsalted=i9;let iY=mm,iU=mm,i_=mm,i$=mm,i1=mm,i2=i9,i0=i9,i4=i9,i5=i9,i3=i9;',
     )
     .replace(
-      'let sV=s6,sY=s6,sU=s6,sF=s6,s_=s6,s$=s7,s1=s7,s2=s7,s0=s7,s3=s7;',
-      'globalThis.__vidcoreDecodeUnsalted=s7,globalThis.__vidcoreDecodeSalted=s6;let sV=s6,sY=s6,sU=s6,sF=s6,s_=s6,s$=s7,s1=s7,s2=s7,s0=s7,s3=s7;',
+      'i7[i_(1831,"QVXB")]=mL,globalThis._0x442368',
+      'i7[i_(1831,"QVXB")]=mL,globalThis.__vidcoreResolve=mL,globalThis._0x442368',
     )
     .replace(
-      's4[sF(3314,"Y7Wc")]=cg,globalThis._0x2326ae=s4._0x2326ae',
-      's4[sF(3314,"Y7Wc")]=cg,globalThis.__vidcoreResolve=cg,globalThis._0x2326ae=s4._0x2326ae',
+      'i7[i0(2158)]=mU,globalThis._0x482d3f',
+      'i7[i0(2158)]=mU,globalThis.__vidcoreInit=mU,globalThis._0x482d3f',
     )
     .replace(
-      's4[s$(1794)]=cY,globalThis._0x429373=s4._0x429373',
-      's4[s$(1794)]=cY,globalThis.__vidcoreInit=cY,globalThis._0x429373=s4._0x429373',
+      'i7[i$(2025,"9CEb")]=mj,globalThis._0x296bbf',
+      'i7[i$(2025,"9CEb")]=mj,globalThis.__vidcoreDecrypt=mj,globalThis._0x296bbf',
     )
     .replace(
-      's4[sU(2747,"QLzy")]=cB,globalThis._0x1b477e=s4._0x1b477e',
-      's4[sU(2747,"QLzy")]=cB,globalThis.__vidcoreDecrypt=cB,globalThis._0x1b477e=s4._0x1b477e',
-    )
-    .replace(
-      '.join("")}sj.from("xZ/aW~D6:U0_]EVA");',
-      '.join("")}globalThis.__vidcoreEncode=sX;sj.from("xZ/aW~D6:U0_]EVA");',
-    )
-    .replace(
-      /let t=_recoverThisFromEnv\(([a-zA-Z0-9]+)\)/g,
-      'let t=_recoverThisFromEnv($1)??globalThis',
+      '.join("")}iB.from("xZ/aW~D6:U0_]EVA");',
+      '.join("")}globalThis.__vidcoreEncode=iX;iB.from("xZ/aW~D6:U0_]EVA");',
     );
 }
 

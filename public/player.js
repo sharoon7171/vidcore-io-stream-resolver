@@ -1,3 +1,5 @@
+import Hls from 'hls.js';
+
 const REF = 'https://vidcore.net/';
 const MOVIE_ID = '550';
 const TV_ID = '44217';
@@ -24,15 +26,12 @@ const rawOut = $('direct');
 const browserOut = $('browser');
 const vlcOut = $('vlc');
 const mpvOut = $('mpv');
-const timing = $('timing');
-const tResolve = $('t-resolve');
-const tPlay = $('t-play');
-const tTotal = $('t-total');
+const playTiming = $('play-timing');
 const serversEl = $('servers');
 
 let hls = null;
 let gen = 0;
-let timer = null;
+let playTimer = null;
 let lastLabel = '';
 let lastServers = [];
 let lastActive = '';
@@ -51,71 +50,50 @@ function showErr(message) {
   err.hidden = false;
 }
 
-function stopTimer() {
-  if (!timer) return;
-  cancelAnimationFrame(timer.raf);
-  timer = null;
+function stopPlayTimer() {
+  if (playTimer) {
+    cancelAnimationFrame(playTimer.raf);
+    playTimer = null;
+  }
+  playTiming.hidden = true;
 }
 
-function startTimer() {
-  stopTimer();
-  timing.hidden = false;
-  tResolve.textContent = '0ms';
-  tPlay.textContent = 'waiting';
-  tTotal.textContent = '0ms';
-  tResolve.className = 'timing__val is-live';
-  tPlay.className = 'timing__val';
-  tTotal.className = 'timing__val is-live';
-
+function startPlayTimer() {
+  stopPlayTimer();
+  playTiming.hidden = false;
+  playTiming.textContent = 'First frame …';
+  playTiming.className = 'play-timing is-live';
   const t0 = performance.now();
-  let resolveAt = null;
-  let playAt = null;
-
   const tick = () => {
-    const now = performance.now();
-    if (resolveAt == null) tResolve.textContent = fmtMs(now - t0);
-    if (resolveAt != null && playAt == null) {
-      tPlay.textContent = fmtMs(now - resolveAt);
-      tPlay.className = 'timing__val is-live';
-    }
-    if (playAt == null) tTotal.textContent = fmtMs(now - t0);
-    if (playAt == null) timer.raf = requestAnimationFrame(tick);
+    playTiming.textContent = `First frame ${fmtMs(performance.now() - t0)}`;
+    playTimer.raf = requestAnimationFrame(tick);
   };
-
-  timer = {
-    raf: requestAnimationFrame(tick),
-    markResolve() {
-      if (resolveAt != null) return;
-      resolveAt = performance.now();
-      tResolve.textContent = fmtMs(resolveAt - t0);
-      tResolve.className = 'timing__val is-done';
-      tPlay.textContent = '0ms';
-      tPlay.className = 'timing__val is-live';
-    },
+  playTimer = { raf: requestAnimationFrame(tick), t0 };
+  return {
     markPlay() {
-      if (playAt != null) return;
-      playAt = performance.now();
-      if (resolveAt == null) this.markResolve();
-      tPlay.textContent = fmtMs(playAt - resolveAt);
-      tPlay.className = 'timing__val is-done';
-      tTotal.textContent = fmtMs(playAt - t0);
-      tTotal.className = 'timing__val is-done';
-      stopTimer();
+      if (!playTimer) return;
+      cancelAnimationFrame(playTimer.raf);
+      playTiming.textContent = `First frame ${fmtMs(performance.now() - t0)}`;
+      playTiming.className = 'play-timing is-done';
+      playTimer = null;
     },
   };
-  return timer;
 }
 
-function vlcCmd(url) {
-  return `vlc --http-referrer='${REF}' "${url}"`;
+function vlcCmd(entry) {
+  return entry.referer ? `vlc --http-referrer='${REF}' "${entry.url}"` : `vlc "${entry.url}"`;
 }
 
-function mpvCmd(url, name) {
-  return `mpv --referrer='${REF}' --force-media-title="${name.replace(/"/g, '\\"')}" "${url}"`;
+function mpvCmd(entry) {
+  const title = `--force-media-title="${lastLabel.replace(/"/g, '\\"')}"`;
+  return entry.referer
+    ? `mpv --referrer='${REF}' ${title} "${entry.url}"`
+    : `mpv ${title} "${entry.url}"`;
 }
 
 function stop() {
   gen += 1;
+  stopPlayTimer();
   if (hls) {
     hls.destroy();
     hls = null;
@@ -125,7 +103,7 @@ function stop() {
   video.load();
 }
 
-function play(entry, clock) {
+function play(entry, playClock) {
   stop();
   const id = gen;
   const source = entry.proxy ? entry.play : entry.url;
@@ -147,7 +125,7 @@ function play(entry, clock) {
       if (!live()) return;
       cleanup();
       err.hidden = true;
-      clock?.markPlay();
+      playClock?.markPlay();
       resolve();
     };
 
@@ -165,7 +143,15 @@ function play(entry, clock) {
 
     if (Hls.isSupported()) {
       let started = false;
-      hls = new Hls({ enableWorker: true, startFragPrefetch: true });
+      hls = new Hls({
+        enableWorker: true,
+        startFragPrefetch: true,
+        maxBufferLength: 30,
+        maxMaxBufferLength: 60,
+      });
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        if (hls.levels.length) hls.currentLevel = hls.levels.length - 1;
+      });
       hls.on(Hls.Events.ERROR, (_, data) => {
         if (data.fatal) fail(data.details || 'playback failed');
       });
@@ -202,15 +188,20 @@ function serverByName(name) {
 function bindExports(entry) {
   rawOut.value = entry.url;
   browserOut.value = entry.play;
-  vlcOut.value = vlcCmd(entry.url);
-  mpvOut.value = mpvCmd(entry.url, lastLabel);
+  vlcOut.value = vlcCmd(entry);
+  mpvOut.value = mpvCmd(entry);
 }
 
 function renderServers(servers, active) {
   serversEl.innerHTML = servers
     .map((entry) => {
       const picked = entry.name === active ? ' badge--active' : '';
-      return `<button type="button" class="badge${picked}" data-name="${entry.name}"><span class="badge__name">${entry.name}</span><span class="badge__ms">${fmtMs(entry.ms)}</span></button>`;
+      const state =
+        entry.ok === true ? ' badge--ok' : entry.ok === false ? ' badge--fail' : ' badge--pending';
+      const icon = entry.ok === true ? '✓' : entry.ok === false ? '✕' : '…';
+      const disabled = entry.ok === false ? ' disabled' : '';
+      const ms = entry.ms != null ? fmtMs(entry.ms) : '…';
+      return `<button type="button" class="badge${picked}${state}" data-name="${entry.name}"${disabled}><span class="badge__icon" aria-hidden="true">${icon}</span><span class="badge__name">${entry.name}</span><span class="badge__ms">${ms}</span></button>`;
     })
     .join('');
   serversEl.closest('.card').hidden = servers.length === 0;
@@ -218,7 +209,7 @@ function renderServers(servers, active) {
 
 function selectServer(name) {
   const entry = serverByName(name);
-  if (!entry) return null;
+  if (!entry?.ok) return null;
   lastActive = name;
   heading.textContent = `${lastLabel} · ${name}`;
   renderServers(lastServers, lastActive);
@@ -256,7 +247,7 @@ function queryParams() {
   return params;
 }
 
-async function pipeNdjson(res, clock) {
+async function pipeNdjson(res) {
   const reader = res.body.getReader();
   const dec = new TextDecoder();
   let buf = '';
@@ -275,21 +266,27 @@ async function pipeNdjson(res, clock) {
       if (evt.event === 'meta') {
         lastLabel = mediaLabel(evt.title, evt.year);
         panel.hidden = false;
+        heading.textContent = lastLabel;
+      }
+      if (evt.event === 'serverlist') {
+        lastServers = evt.servers.map((entry) => ({ name: entry.name }));
+        renderServers(lastServers, lastActive);
       }
       if (evt.event === 'server') {
-        lastServers.push(evt.server);
+        const idx = lastServers.findIndex((entry) => entry.name === evt.server.name);
+        if (idx >= 0) lastServers[idx] = evt.server;
+        else lastServers.push(evt.server);
         renderServers(lastServers, lastActive);
-        if (!playing) {
+        if (evt.server.ok && !playing) {
           playing = true;
-          clock.markResolve();
           selectServer(evt.server.name);
-          play(evt.server, clock).catch((e) => showErr(e.message));
+          play(evt.server, startPlayTimer()).catch((e) => showErr(e.message));
         }
       }
     }
   }
 
-  if (!lastServers.length) throw new Error('no servers returned');
+  if (!lastServers.some((entry) => entry.ok)) throw new Error('no working server');
 }
 
 document.querySelectorAll('[data-copy]').forEach((node) => {
@@ -308,14 +305,12 @@ document.querySelectorAll('[data-copy]').forEach((node) => {
 
 serversEl.addEventListener('click', async (event) => {
   const btnNode = event.target.closest('[data-name]');
-  if (!btnNode || btnNode.dataset.name === lastActive) return;
+  if (!btnNode || btnNode.disabled || btnNode.dataset.name === lastActive) return;
   const entry = selectServer(btnNode.dataset.name);
   if (!entry) return;
-  const clock = startTimer();
-  clock.markResolve();
   err.hidden = true;
   try {
-    await play(entry, clock);
+    await play(entry, startPlayTimer());
   } catch (e) {
     showErr(e.message);
   }
@@ -333,17 +328,15 @@ form.addEventListener('submit', async (event) => {
   lastServers = [];
   lastActive = '';
   playing = false;
-  const clock = startTimer();
   try {
     const res = await fetch(`/api/resolve?${queryParams()}`);
     if (!res.ok) {
       const data = await res.json();
       throw new Error(`${data.stage || 'error'}: ${data.error || 'resolve failed'}`);
     }
-    await pipeNdjson(res, clock);
+    await pipeNdjson(res);
   } catch (e) {
-    stopTimer();
-    timing.hidden = true;
+    stopPlayTimer();
     showErr(e.message);
   } finally {
     btn.disabled = false;

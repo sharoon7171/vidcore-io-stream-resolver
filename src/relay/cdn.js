@@ -28,12 +28,17 @@ export async function pull(url) {
   return Buffer.from(await response.arrayBuffer());
 }
 
-export async function relay(url, req, res) {
+export async function relay(url, req, res, serverName) {
   const response = await fetchUpstream(url, { headers: headers(req.headers.range) });
   if (!response.ok && response.status !== 206) throw new Error(`upstream ${response.status}`);
 
-  const out = { 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-cache' };
-  for (const name of ['content-type', 'content-length', 'content-range', 'accept-ranges']) {
+  const upstreamType = response.headers.get('content-type') || '';
+  const out = {
+    'Access-Control-Allow-Origin': '*',
+    'Cache-Control': serverName === 'Prime' ? 'public, max-age=3600' : 'no-cache',
+    'content-type': serverName === 'Prime' ? 'video/mp2t' : upstreamType || 'application/octet-stream',
+  };
+  for (const name of ['content-length', 'content-range', 'accept-ranges']) {
     const value = response.headers.get(name);
     if (value) out[name] = value;
   }

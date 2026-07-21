@@ -168,7 +168,7 @@ export async function runResolver(token, ctx = {}) {
   const state = { value: null };
   let listMoBody = null;
   const resolverCtx = buildContext(token, ctx, {
-    setServers: (list) => servers.push(structuredClone(list)),
+    setServers: (list) => servers.push(list.map((entry) => ({ ...entry }))),
     setState: (value) => {
       state.value = value;
     },
@@ -177,7 +177,7 @@ export async function runResolver(token, ctx = {}) {
 
   const captureListMo = async (url, init, fetchFn) => {
     const response = await fetchFn();
-    if (init.method === 'POST' && /\/(?:u)?mo\//.test(url) && !listMoBody && response.ok) {
+    if (init.method === 'POST' && (/\/(?:u)?mo\//.test(url) || /\/\d{10,}\/[0-9a-f-]{36}\//.test(url)) && !listMoBody && response.ok) {
       listMoBody = await response.clone().text();
     }
     return response;
@@ -198,7 +198,7 @@ export async function runResolver(token, ctx = {}) {
 
   const deadline = Date.now() + (ctx.timeoutMs ?? 45000);
   while (servers.length === 0 && state.value == null && Date.now() < deadline) {
-    await new Promise((resolveWait) => setTimeout(resolveWait, 250));
+    await new Promise((resolveWait) => setTimeout(resolveWait, 16));
   }
 
   if (state.value === 500) throw new Error('resolver API error');
@@ -213,11 +213,16 @@ export async function runResolver(token, ctx = {}) {
   return { servers: [activeServers], vmCtx: { ...resolverCtx, listMoBody } };
 }
 
+let streamMoPrefix;
+
 export function getStreamMoPath(server) {
   if (!server?.data) throw new Error('server missing data token');
-  const decodeUnsalted = requireVm('__vidcoreDecodeUnsalted');
-  const decodeSalted = requireVm('__vidcoreDecodeSalted');
-  return `${decodeUnsalted(1867)}/${decodeSalted(1465, '&NC7')}/${server.data}`;
+  if (!streamMoPrefix) {
+    const decodeUnsalted = requireVm('__vidcoreDecodeUnsalted');
+    const decodeSalted = requireVm('__vidcoreDecodeSalted');
+    streamMoPrefix = `${decodeUnsalted(541)}/${decodeSalted(2937, 'yFkk')}`;
+  }
+  return `${streamMoPrefix}/${server.data}`;
 }
 
 export async function decryptMoBody(body, ctx) {

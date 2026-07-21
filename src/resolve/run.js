@@ -1,33 +1,26 @@
 import { fetchEmbed } from '../vidcore/page.js';
 import { createResolverFetch } from '../vidcore/session.js';
-import { needsBrowserProxy, playUrl } from '../relay/link.js';
+import { needsReferer, playUrl } from '../relay/link.js';
 import { runResolver } from '../vm/runtime.js';
 import { unlockServer } from './unlock.js';
-import { pool } from './pool.js';
 
 function activeServers(servers) {
   const list = servers.at(-1);
   return list ? list.filter((entry) => entry?.data) : [];
 }
 
-async function prepare(input) {
-  const embed = await fetchEmbed(input.kind, input.id, {
-    season: input.season,
-    episode: input.episode,
-  });
-  const sessionFetch = createResolverFetch(embed.referer, embed.jar);
-  const listMo = await runResolver(embed.en, {
-    ...embed.props,
-    type: embed.type,
-    id: embed.id,
-    season: input.season,
-    episode: input.episode,
-    referer: embed.referer,
-    fetch: sessionFetch,
-  });
-  const targets = activeServers(listMo.servers);
-  if (!targets.length) throw Object.assign(new Error('server list empty'), { stage: 'resolve' });
-  return { embed, sessionFetch, vmCtx: listMo.vmCtx, targets };
+function probeOrder(targets) {
+  const seen = new Set();
+  const out = [];
+  const add = (entry) => {
+    if (!entry || seen.has(entry.name)) return;
+    seen.add(entry.name);
+    out.push(entry);
+  };
+  add(targets.find((entry) => entry.name === 'Orbit'));
+  add(targets.find((entry) => entry.selected));
+  for (const entry of targets) add(entry);
+  return out;
 }
 
 async function probeOne(server, sessionFetch, vmCtx, origin) {
@@ -35,13 +28,15 @@ async function probeOne(server, sessionFetch, vmCtx, origin) {
   try {
     const config = await unlockServer(server, sessionFetch, vmCtx);
     const url = config.url;
+    const referer = needsReferer(server.name);
     return {
       name: server.name,
       ok: true,
       ms: Date.now() - started,
       url,
-      play: playUrl(origin, url),
-      proxy: needsBrowserProxy(url),
+      play: playUrl(origin, url, server.name),
+      proxy: referer,
+      referer,
     };
   } catch {
     return { name: server.name, ok: false, ms: Date.now() - started };
@@ -49,26 +44,49 @@ async function probeOne(server, sessionFetch, vmCtx, origin) {
 }
 
 export async function* stream(input, origin) {
-  let prepared;
+  let embed;
   try {
-    prepared = await prepare(input);
+    embed = await fetchEmbed(input.kind, input.id, {
+      season: input.season,
+      episode: input.episode,
+    });
   } catch (err) {
     yield { event: 'error', stage: err.stage || 'resolve', error: err.message };
     return;
   }
 
-  const { embed, sessionFetch, vmCtx, targets } = prepared;
   yield { event: 'meta', title: embed.meta.title, year: embed.meta.year };
 
+  const sessionFetch = createResolverFetch(embed.referer, embed.jar);
+  let listMo;
+  try {
+    listMo = await runResolver(embed.en, {
+      ...embed.props,
+      type: embed.type,
+      id: embed.id,
+      season: input.season,
+      episode: input.episode,
+      referer: embed.referer,
+      fetch: sessionFetch,
+    });
+  } catch (err) {
+    yield { event: 'error', stage: err.stage || 'resolve', error: err.message };
+    return;
+  }
+
+  const targets = probeOrder(activeServers(listMo.servers));
+  if (!targets.length) {
+    yield { event: 'error', stage: 'resolve', error: 'server list empty' };
+    return;
+  }
+
+  yield { event: 'serverlist', servers: targets.map((entry) => ({ name: entry.name })) };
+
   let found = false;
-  for await (const hit of pool(
-    targets,
-    (server) => probeOne(server, sessionFetch, vmCtx, origin),
-    targets.length,
-  )) {
-    if (!hit.value.ok) continue;
-    found = true;
-    yield { event: 'server', server: hit.value };
+  for (const server of targets) {
+    const result = await probeOne(server, sessionFetch, listMo.vmCtx, origin);
+    yield { event: 'server', server: result };
+    if (result.ok) found = true;
   }
 
   if (!found) yield { event: 'error', stage: 'resolve', error: 'no working server' };

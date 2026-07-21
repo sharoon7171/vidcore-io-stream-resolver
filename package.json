@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "happy-dom": "^20.10.6",
+    "hls.js": "^1.6.16",
     "undici": "^7.28.0"
   }
 }
