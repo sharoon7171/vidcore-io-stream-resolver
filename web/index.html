@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="Resolve HLS stream URLs from vidcore.net by TMDB movie or TV ID. Play in the browser or export links for VLC and MPV.">
+  <title>VidCore HLS Stream Resolver</title>
+  <link rel="stylesheet" href="/styles/app.css">
+  <script type="importmap">
+  {
+    "imports": {
+      "hls.js": "/vendor/hls.mjs"
+    }
+  }
+  </script>
+</head>
+<body>
+  <div class="app">
+    <header class="top">
+      <h1 class="top__title">VidCore HLS Stream Resolver</h1>
+      <p class="top__desc">Resolve HLS stream URLs from <a href="https://vidcore.net" target="_blank" rel="noopener noreferrer">vidcore.net</a> by TMDB movie or TV ID. Play in the browser or export links for VLC and MPV.</p>
+    </header>
+
+    <section class="card">
+      <form id="form">
+        <div class="resolve__row resolve__row--form">
+          <label class="resolve__field">
+            <span class="resolve__label">Type</span>
+            <select id="type">
+              <option value="movie">Movie</option>
+              <option value="tv">TV</option>
+            </select>
+          </label>
+          <label class="resolve__field resolve__field--grow">
+            <span class="resolve__label" id="id-label">Movie ID</span>
+            <input id="id" type="text" inputmode="numeric" required placeholder="550" value="550">
+          </label>
+          <div class="resolve__tv" id="tv-fields" hidden>
+            <label class="resolve__field">
+              <span class="resolve__label">Season</span>
+              <input id="season" type="text" inputmode="numeric" placeholder="1">
+            </label>
+            <label class="resolve__field">
+              <span class="resolve__label">Episode</span>
+              <input id="episode" type="text" inputmode="numeric" placeholder="1">
+            </label>
+          </div>
+          <button type="submit">Resolve</button>
+        </div>
+        <p class="resolve__hint" id="hint-movie">Movie — TMDB ID only, e.g. <code>550</code></p>
+        <p class="resolve__hint" id="hint-tv" hidden>TV — TMDB ID plus season and episode, e.g. <code>44217</code> · S1 · E1</p>
+      </form>
+      <p id="err" class="msg msg--err" hidden></p>
+    </section>
+
+    <section id="out" class="stack" hidden>
+      <div class="card">
+        <h2 id="title" class="stream-title">Stream</h2>
+        <p id="play-timing" class="play-timing" hidden></p>
+        <div class="player">
+          <div id="player"><video id="video" controls playsinline></video></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3 class="section-title">Servers</h3>
+        <p class="servers__hint">Resolve time shown per server</p>
+        <div id="servers" class="servers"></div>
+      </div>
+
+      <div class="card">
+        <h3 class="section-title">Export</h3>
+        <ul class="exports">
+          <li>
+            <div class="export__meta">
+              <span class="export__name">Direct URL</span>
+              <span class="export__hint">Upstream M3U8 URL</span>
+            </div>
+            <div class="export__row">
+              <input id="direct" readonly>
+              <button type="button" data-copy="direct">Copy</button>
+            </div>
+          </li>
+          <li id="export-browser" hidden>
+            <div class="export__meta">
+              <span class="export__name">Proxy URL</span>
+              <span class="export__hint">Shown only when playback uses the proxy</span>
+            </div>
+            <div class="export__row">
+              <input id="browser" readonly>
+              <button type="button" data-copy="browser">Copy</button>
+            </div>
+          </li>
+          <li>
+            <div class="export__meta">
+              <span class="export__name">VLC</span>
+              <span class="export__hint">VLC — referer added only when required</span>
+            </div>
+            <div class="export__row">
+              <input id="vlc" readonly>
+              <button type="button" data-copy="vlc">Copy</button>
+            </div>
+          </li>
+          <li>
+            <div class="export__meta">
+              <span class="export__name">MPV</span>
+              <span class="export__hint">MPV — referer added only when required</span>
+            </div>
+            <div class="export__row">
+              <input id="mpv" readonly>
+              <button type="button" data-copy="mpv">Copy</button>
+            </div>
+          </li>
+        </ul>
+      </div>
+    </section>
+  </div>
+  <script type="module" src="/main.js"></script>
+</body>
+</html>

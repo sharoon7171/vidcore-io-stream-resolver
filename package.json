@@ -1,15 +1,19 @@
 {
-  "name": "vidcore-stream-resolver",
+  "name": "vidcore-hls-scraper-resolver",
   "type": "module",
   "scripts": {
-    "start": "node scripts/start.js"
+    "build:web": "rm -rf dist && tsc -p tsconfig.web.json && mkdir -p dist/styles && cp web/index.html dist/ && cp web/styles/app.css dist/styles/",
+    "start": "npm run build:web && lsof -ti:${PORT:-3000} | xargs kill -9 2>/dev/null; tsx src/server.ts"
   },
   "engines": {
     "node": ">=20"
   },
   "dependencies": {
-    "happy-dom": "^20.10.6",
-    "hls.js": "^1.6.16",
-    "undici": "^7.28.0"
+    "hls.js": "^1.6.16"
+  },
+  "devDependencies": {
+    "@types/node": "^25.2.3",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
   }
 }

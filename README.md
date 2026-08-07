@@ -1,183 +1,231 @@
-# vidcore-stream-resolver
+# VidCore Stream Resolver
 
-Resolve HLS stream URLs from [vidcore.net](https://vidcore.net) by TMDB movie or TV ID. The server fetches the embed page, runs the site’s player logic in a Node VM sandbox to obtain and unlock CDN servers, then probes them in parallel until a working stream is found.
+Node.js **stream resolver** for [vidcore.net](https://vidcore.net): an embed **scraper**, encrypted catalog **API** client, and **HLS proxy** with an in-browser player. Pass a TMDB movie or TV id; the server reverse-engineers the site’s handshake, resolves M3U8 URLs per mirror, and plays (or exports) them.
 
-## How stream URLs are resolved
+A watch page is not the stream. The playlist never sits in the HTML. The official player scrapes its own embed payload, posts sealed tokens to opaque catalog endpoints, decrypts the response, then hits CDN hosts that reject ordinary browser requests from another origin. This repo implements that chain as a local scraper → resolver → proxy pipeline and a small REST API.
 
-Given a TMDB ID, the server produces an upstream M3U8 URL. Three steps:
+TypeScript, Node.js 20+, ESM. Server via `tsx`; UI builds into `dist/`.
+
+## Table of Contents
+
+- [What Gets Recovered](#what-gets-recovered)
+- [Architecture](#architecture)
+- [Scraper](#scraper)
+- [Resolver](#resolver)
+- [Proxy and Player](#proxy-and-player)
+- [Playback Hardening](#playback-hardening)
+- [Stack and Layout](#stack-and-layout)
+- [Run](#run)
+- [HTTP API](#http-api)
+- [Disclaimer](#disclaimer)
+
+## What Gets Recovered
+
+Reverse engineering the client bundles and live traffic maps to four layers:
+
+| Artifact | Source | Role in this repo |
+| --- | --- | --- |
+| `en` session token | Next.js props in embed HTML | Scraper extracts it |
+| Server catalog | Encrypted list API response | Resolver decrypts names + unlock tokens |
+| Stream config | Encrypted unlock API response | Resolver decrypts the M3U8 `url` |
+| Manifests / segments | CDN (moon, studyedu, `/vd/…`) | Proxy rewrites and relays for the player |
+
+Crypto was taken from the site’s own path (not brute-forced):
+
+- **List request seal** — custom pipeline around AES-CBC of `en` (`src/resolver/crypto/token.ts`)
+- **Catalog / unlock open** — AES-256-GCM (`src/resolver/crypto/payload.ts`)
+
+## Architecture
 
 ```mermaid
 flowchart LR
-  A["1 · Scrape embed"] --> B["2 · Run player VM"]
-  B --> C["3 · Unlock servers"]
-  C --> D["upstream M3U8"]
+  id[TMDB id] --> scrape[Scraper]
+  scrape -->|en cookies meta| resolve[Resolver]
+  resolve -->|catalog API unlock| urls[M3U8 URLs]
+  urls --> proxy[HLS proxy]
+  proxy --> ui[hls.js player]
+  urls --> export[VLC MPV]
 ```
 
-### 1 · Scrape embed
+1. Parse movie / TV input for the resolve API.
+2. Scrape the embed; keep cookies and browser-like headers.
+3. Call the catalog list API; unlock each mirror in preference order.
+4. Attach a proxied play URL when the mirror needs the HLS relay.
+5. Stream NDJSON as each unlock finishes so the player can start on the first success.
 
-Map the TMDB ID to a vidcore page:
+## Scraper
 
-- Movie → `GET /movie/{id}`
-- TV → `GET /tv/{id}/{season}/{episode}`
+**Code:** `src/scraper/`
 
-`fetchEmbed` (`src/vidcore/page.js`) downloads that page, saves cookies, and pulls the `en` token plus title/year from the Next.js payload embedded in the HTML. The `en` token is required by the player VM on the next step.
+The scraper loads the same embed document the site uses for movies and episodes.
 
-### 2 · Run player VM
+### Collects
 
-Vidcore’s player ships as webpack chunks in `vendor/chunks/`. We load them into a fake browser (`happy-dom` + `node:vm`) and call the same entry points the site uses:
+- Path `/movie/{id}` or `/tv/{id}/{season}/{episode}`
+- `en` token plus title / year from serialized page props
+- Cookie jar for later catalog POSTs
+- Referer bound to the embed URL and scraper request headers
 
-1. `__vidcoreInit()` — start the player
-2. `__vidcoreResolve(ctx)` — run the resolve flow
+### Flow
 
-Hooks capture the output:
+1. `GET` the HTML (`scraperHeaders` in `request.ts`).
+2. Persist `Set-Cookie` (`session.ts`).
+3. Parse props (`embed.ts` → `scrapeEmbedPage`).
+4. Return `EmbedSnapshot`: `{ en, meta, referer, jar }`.
 
-- `setServers` — receives the server list (each entry has `name` + `data` token)
-- intercepted `fetch` — sends network calls through a session-aware fetch; also saves the list-MO response body
+Unlocking mirrors is out of scope here — the scraper only rebuilds the session the player would have after the first page load.
 
-All `/mo/` requests carry session cookies, CSRF token, and `X-Requested-With: XMLHttpRequest` (`createResolverFetch` in `src/vidcore/session.js`).
+## Resolver
 
-If the list-MO body decrypts to a fresh server array, that replaces the list from `setServers`.
+**Code:** `src/resolver/`
 
-### 3 · Unlock servers
+The resolver turns a TMDB id into concrete stream URLs by replaying the encrypted catalog API.
 
-Each server’s `data` token unlocks one stream URL. Servers are probed sequentially (`src/resolve/run.js`); the site default is tried first.
+### Pipeline
 
-For each server:
+`resolvePlayback` (`pipeline.ts`) yields events as it goes:
 
-1. `getStreamMoPath(server)` — VM decoders build the POST path from `server.data`
-2. POST to that path — vidcore returns an encrypted body
-3. `decryptMoBody` — VM decrypts it to `{ url: "…/index.m3u8" }`
+1. Run the scraper.
+2. Emit `meta`.
+3. Build `createScraperFetch` for cookie + referer POSTs.
+4. `listCatalogServers` — `encryptResolveToken(en)`, list action POST, `decryptResolvePayload`.
+5. Emit `serverlist`.
+6. For each preferred server with a `data` token: `unlockCatalogStream`, emit `server` with `ms`, `url`, and proxy fields.
+7. Emit `error` only if every unlock fails.
 
-The first successful unlocks are streamed to the caller. Failed servers are skipped silently.
+Unlock order: Orbit → Supreme → Prime → Premiere 4K → Horizon.
 
-```mermaid
-sequenceDiagram
-  participant R as run.js
-  participant U as unlock.js
-  participant V as VM
-  participant C as CDN
+### Catalog API Crypto
 
-  R->>U: server.data
-  U->>V: getStreamMoPath
-  U->>C: POST stream-MO
-  C-->>U: encrypted body
-  U->>V: decryptMoBody
-  V-->>R: config.url
-```
-
-Pipeline entry point: `stream()` in `src/resolve/run.js`. Servers are probed **one at a time** (selected server first). Each probe is one POST unlock request.
-
-## Playback
-
-Each unlocked server returns three playback fields (set in `probeOne`):
-
-| Field | Meaning |
+| Step | Function |
 | --- | --- |
-| `url` | upstream M3U8 on the CDN |
-| `play` | URL the browser should load |
-| `proxy` | whether the browser must use the relay |
-| `referer` | whether VLC/MPV need a vidcore.net referer |
+| Seal list token | `encryptResolveToken` |
+| Decrypt list / unlock body | `decryptResolvePayload` |
+| Endpoints | Fixed mo base + list / stream action ids in `catalog.ts` |
 
-```mermaid
-flowchart TD
-  U["server.url"] --> NAME{"server name"}
-  NAME -->|Orbit| DIRECT["referer = false\nproxy = false\nplay = url"]
-  NAME -->|Prime| PROXY["referer = true\nproxy = true\nplay = /api/hls?url=…"]
-  NAME -->|other| CHECK{"shegu.org\nor anotherweather.com?"}
-  CHECK -->|yes| PROXY
-  CHECK -->|no| DIRECT2["referer = false\nproxy = false\nplay = url"]
-  DIRECT --> B1["Browser loads url"]
-  DIRECT2 --> B1
-  PROXY --> B2["Browser loads play"]
-  U --> EXT["VLC / MPV: referer flag from API"]
-```
+### NDJSON Resolve API
 
-Referer by server name: `Orbit` — no referer; `Prime` — referer required. Other servers use `REFERER_HOSTS` in `src/relay/link.js`.
-
-**Browser** — cross-origin HLS cannot send a custom referer. When `proxy` is `true`, `playUrl` wraps the M3U8 in `/api/hls?url=…`. The relay fetches upstream with `referer: {VIDCORE_ORIGIN}/`, rewrites nested playlist URIs, and pipes segments (`src/relay/hls.js`, `src/relay/cdn.js`). When `proxy` is `false`, browser loads `url` directly.
-
-**VLC / MPV** — use `url`, not `play`. Add referer only when `referer` is `true`:
-
-```
-vlc --http-referrer='https://vidcore.net/' "<url>"
-mpv --referrer='https://vidcore.net/' "<url>"
-vlc "<url>"
-```
-
-## API
-
-### `GET /api/resolve`
-
-```
-/api/resolve?type=movie&id=550
-/api/resolve?type=tv&id=44217&season=1&episode=1
-```
-
-| Param | Movie | TV |
-| --- | --- | --- |
-| `type` | `movie` | `tv` |
-| `id` | TMDB ID | TMDB ID |
-| `season` | — | required |
-| `episode` | — | required |
-
-Bad params → `400` `{ ok: false, stage: "input", error: "…" }`.
-
-Good params → `200` NDJSON (one JSON object per line):
-
-| `event` | Fields |
+| Event | Payload |
 | --- | --- |
-| `meta` | `title`, `year` |
-| `serverlist` | `servers` — `{ name }[]` before probing |
-| `server` | `name`, `ok`, `ms`, and when `ok` is true: `url`, `play`, `proxy`, `referer` |
-| `error` | `stage`, `error` |
+| `meta` | Title, year |
+| `serverlist` | Mirror names |
+| `server` | `ok`, `ms`, `url`, `play`, referer / proxy flags |
+| `error` | Stage + message |
 
-Every probed server emits a `server` event (`ok: true` or `ok: false`). The UI plays the first `ok: true` result.
+Progressive resolve keeps the UI responsive: per-mirror timings and early playback without waiting for the full unlock pass.
 
-### `GET /api/hls?url=`
+## Proxy and Player
 
-Browser relay for referer-locked CDN URLs. Rejects with `400 proxy not required` when the URL host is not in `REFERER_HOSTS`.
+**Code:** `src/proxy/` · **UI:** `web/player/` (hls.js)
 
-## Project layout
+### Why the Proxy Exists
+
+Direct M3U8 links often work in VLC or MPV when a referer can be set. The in-page player cannot rely on that:
+
+- **CORS** — CDN origins differ from the UI host; hls.js needs readable manifests and segments.
+- **Forbidden request headers** — page scripts cannot set `Referer` the way the CDN expects.
+- **Origin gating** — some `/vd/` endpoints return `403` for `Origin: http://localhost:…` and succeed when the request is made like the embed site. The proxy sits on the server, sends `Referer: https://vidcore.net/` (overridable), and adds CORS for the UI.
+
+The resolver therefore returns:
+
+- `url` — upstream M3U8 for export / external players
+- `play` — `/api/hls?url=…&server=…` for the built-in player
+
+### Relay Behavior
+
+`serveProxyHls` (`hls.ts`):
+
+1. Upstream GET with keep-alive, optional `Range`, and site referer.
+2. Playlists (`.m3u8`) — rewrite media lines and `URI="…"` through `/api/hls`.
+3. Segments — pipe bytes; optional MIME from the server registry (e.g. Orbit `video/mp2t`, Horizon `video/mp4`).
+
+`servers.ts` maps mirror name → proxy flags and segment type. Unknown names stay non-proxied.
+
+## Playback Hardening
+
+CDN behavior for Prime / Supreme–style `/vd/` streams was reverse-engineered from live unlocks and segment fetches:
+
+- Unlock playlists often land on the **moon** host.
+- Media lines may point at **studyedu** with the same `/vd/` token (identical bytes on both).
+- Local UI Origin without proxy → **403**.
+- Racing moon and studyedu on one keep-alive agent could play the first init, then hang: aborting the losing request stalled later GETs on the agent.
+
+Proxy rules now:
+
+1. Rewrite `/vd/…` playlist targets toward moon when proxied.
+2. Try moon first (socket timeout).
+3. Fall back to studyedu only after moon fails — sequential, never parallel destroy.
+4. One upstream path per request so keep-alive stays clean.
+5. Forward `Range` for seek.
+
+The player reports time-to-first-frame and can switch mirrors without re-scraping.
+
+## Stack and Layout
+
+| Piece | Detail |
+| --- | --- |
+| Runtime | Node.js ≥ 20, ESM, `tsx` for `src/` |
+| Language | TypeScript (strict); UI compiled to `dist/` |
+| HTTP / fetch | `node:http`, native `fetch` |
+| Crypto | `node:crypto` |
+| Browser HLS | hls.js via `/vendor/hls.mjs` |
 
 ```
 src/
-├── server.js           entry point
-├── env.js              PORT, VIDCORE_ORIGIN, USER_AGENT
-├── resolve/            input validation, pipeline, unlock, pool
-├── vidcore/            embed fetch, session cookies, headers
-├── vm/                 sandbox, chunk loader, decrypt
-├── relay/              proxy routing, HLS relay, CDN fetch
-└── http/               router, static files
-public/                 web UI
-vendor/chunks/          vidcore player chunks
+  server.ts           entry
+  config.ts           PORT, site origin, user-agent
+  scraper/            embed scrape + session
+  resolver/           parse, catalog API, pipeline, crypto
+  proxy/              HLS rewrite + mirror registry
+  http/               router + static (dist/)
+web/                  UI source
+dist/                 built UI (gitignored)
 ```
 
-## Web UI
+| Env | Default | Use |
+| --- | --- | --- |
+| `PORT` | `3000` | Listen port |
+| `HOST` | unset | Bind when set |
+| `VIDCORE_ORIGIN` | `https://vidcore.net` | Scraper / referer origin |
+| `USER_AGENT` | Chrome desktop | Upstream UA |
+
+## Run
 
 ```bash
 npm install
 npm start
 ```
 
-Node `>=20`. Opens at `http://localhost:3000` (override with `PORT`, bind with `HOST`).
+Builds `web/` → `dist/`, clears the port, starts `tsx src/server.ts`. UI: `http://localhost:3000/`.
 
-The UI at `public/index.html` calls `/api/resolve`, plays the first working server, and lets you switch between servers. Export panel:
+## HTTP API
 
-| Field | Source |
-| --- | --- |
-| Direct URL | `server.url` |
-| Browser URL | `server.play` |
-| VLC | command with Direct URL + referer |
-| MPV | command with Direct URL + referer |
+### `GET /api/resolve`
 
-| Variable | Default |
-| --- | --- |
-| `PORT` | `3000` |
-| `VIDCORE_ORIGIN` | `https://vidcore.net` |
-| `USER_AGENT` | Chrome 137 mobile |
+Stream resolver endpoint. Scrapes the embed, then unlocks mirrors.
 
-Input: movie needs TMDB ID only; TV needs ID + season + episode.
+| Query | Required | Description |
+| --- | --- | --- |
+| `type` | yes | `movie` or `tv` |
+| `id` | yes | TMDB id |
+| `season` | tv | Season |
+| `episode` | tv | Episode |
+
+`Content-Type: application/x-ndjson`. Bad input → `400` JSON.
+
+### `GET /api/hls`
+
+HLS proxy for manifests and segments.
+
+| Query | Required | Description |
+| --- | --- | --- |
+| `url` | yes | Absolute upstream URL |
+| `server` | yes | Mirror name in the registry |
+
+Rewritten M3U8 or proxied media with CORS.
 
 ## Disclaimer
 
-This project is for **educational purposes only** — to study HTTP streaming, reverse-engineering techniques, and client–server interaction. It is not intended to facilitate copyright infringement. Users are responsible for complying with applicable laws and the terms of service of any content they access.
+For education and research into embed scrapers, encrypted catalog APIs, HLS resolvers, and CDN proxies.
+
+Does not host or redistribute media. Upstream sites remain separate services. Comply with copyright, terms of service, and local law. No warranty.
