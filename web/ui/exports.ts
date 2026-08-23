@@ -1,4 +1,4 @@
-const REF = 'https://vidcore.net/';
+const REF = 'https://vidcore.io/';
 
 type Entry = {
   url: string;
