@@ -2,9 +2,9 @@ import crypto from 'node:crypto';
 import { Buffer } from 'node:buffer';
 
 const HEX_KEY =
-  '9b425029a188e1131dbc32a24632a5ac9124037d52587001844f02315c00ebb0';
-const NUM_A = 1318175778;
-const NUM_B = 5464207410;
+  '65514a10161847e8ec6d0400d80bee8dc69f6ba5c09b56729975781f66eaa4ca';
+const NUM_A = 5839172817;
+const NUM_B = 5717337600;
 
 function writeUInt64LE(n: number) {
   const buf = Buffer.allocUnsafe(8);
