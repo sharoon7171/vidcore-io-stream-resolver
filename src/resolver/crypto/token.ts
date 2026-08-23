@@ -2,15 +2,15 @@ import crypto from 'node:crypto';
 import { Buffer } from 'node:buffer';
 
 const AES_KEY = Buffer.from(
-  'da0113008b4e86066e28d529887d85e570ee04b0f6f0cc68d481b5233b991f54',
+  'bc3b061beff76cf02a4e6e5b4de747407c9ea177faf1d0d953a0de9382e59089',
   'hex',
 );
-const AES_IV = Buffer.from('9ac8413d165f5e5c1e1103837b5e61b2', 'hex');
-const PREFIX = Buffer.from('aa094', 'hex');
+const AES_IV = Buffer.from('29e99500c65d49bfd6d1e9786e742e7d', 'hex');
+const PREFIX = Buffer.from('151ac1b316ec9db4', 'hex');
 
 const ALPHA = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_';
 const ALPHA_TO =
-  'TV2w64ayBhSzOkZ-N_5L9vWse13P0E8FHIArcGjMXuRqgpCdlYUn7JoibxDtQmKf';
+  'sLeXqwO8WHuTGiQ9JpmV3_1jBhxZAr6n240YgDSU7NovytRabC5F-kEMdzcKlfPI';
 const ENC = new Map([...ALPHA].map((c, i) => [c, ALPHA_TO[i]]));
 
 function encodeCustom(buf: Buffer | Uint8Array) {
@@ -26,14 +26,12 @@ function encodeCustom(buf: Buffer | Uint8Array) {
 
 function rotl(x: number, n: number) {
   n &= 7;
-  if (!n) return x & 255;
-  return ((x << n) | (x >>> (8 - n))) & 255;
+  return n ? ((x << n) | (x >>> (8 - n))) & 255 : x & 255;
 }
 
 function rotr(x: number, n: number) {
   n &= 7;
-  if (!n) return x & 255;
-  return ((x >>> n) | (x << (8 - n))) & 255;
+  return n ? ((x >>> n) | (x << (8 - n))) & 255 : x & 255;
 }
 
 function xorshift(seedMaterial: Buffer | Uint8Array) {
@@ -228,16 +226,16 @@ type PipeMix = { mix: string };
 type PipeStep = PipeXor | PipeMix;
 
 const PIPE: PipeStep[] = [
-  { key: '2ntGSzXfJFs0hDs88l+Bb8JUwUn1Cv1SO9aK+UZa7ZU=', salt: 'ZEoMcPJnrrw=', xf: XF_EA },
-  { mix: '3VBriafyK762DRIdc5LjFTk+GA4dbA3swiAWzTlVOVc=' },
-  { key: 'LposjLRR+u1zH3v9cdbdlZ6ndC09ZKur+yxm40F2sVM=', salt: 'Dumq7XMwDOY=', xf: XF_BAD },
-  { mix: 'yMJbT7L+Ae97prvFUBlm54hYX9LgqpaFEP5Mnsg8vFQ=' },
-  { key: '9lLhnwArYvk1+ve+oZManKJjAeZQAM4qN+owU2FJ1+A=', salt: '3vKxl02f', xf: XF_B81 },
-  { mix: '+u3IoSX0Ka9w+6NRTnPJypiTtiLelUob4F+heqowdGY=' },
-  { key: '2H9z2kEoZ2Gj6Fiste7KHwMnafIMdV5xqT74AEGk0y4=', salt: 'jXyIA2g=', xf: XF_C272 },
-  { mix: 'XyQ+FAbK0EXQ0yS7G7i1MvXTI1xWz9n5ZGUWBwkSfRo=' },
-  { key: 'aOc7TpxM4aeKW3Dl+SU/gGeEfe1q3Jqnvwdust0uLaI=', salt: 'BkLBcRo=', xf: XF_C936 },
-  { mix: 'pDw5NQnCc1F4yT4R8bqhASC1ExUNJqdCJ3gQwgVV5Xc=' },
+  { key: '4A0cZbwoo3dBMR+hBpflxHq7IulaAG+VHEP+/KuuGso=', salt: 'I2tW0Lrce40=', xf: XF_EA },
+  { mix: 'oqDHQwu30IFWxZuj737jFpp8xLPCEB8mjIt+syKfJRw=' },
+  { key: 'spUa4i09naB+5oT/drp4yipRNCoPCf/sHySmWjFkv6I=', salt: '4Lclzk8BGw0=', xf: XF_BAD },
+  { mix: 'h+FAFudwW8v7ike0RZHDffmyeYfPiYuzQMFuowMb5oU=' },
+  { key: '/fHl7Qv1ikwPKyL0lUzfSpezMzs/NQhXLd4oM2EV7rE=', salt: 'ktBTjeZq', xf: XF_B81 },
+  { mix: 'uurIGtPeTc+ba1ChtLArhWmoRF/inQKroOVCnRWF95A=' },
+  { key: 'x3pVPpO3HuDn6gWZWl2xZGMPKder59HOmXQapKYZFrc=', salt: 'UrW2YxI=', xf: XF_C272 },
+  { mix: 'GXnh/ODoP1jQ1Bg4cK/2evHe1ftZq28kHUEjcNluJBs=' },
+  { key: '9tUZWeV9YLIXwIozINaRWJbShHyAkQqzK4DXjWNyxHE=', salt: 'eM8vlGc=', xf: XF_C936 },
+  { mix: 'yxIDC/Gq/J7LOm/LFifOdFZQ7UQV3lKsaFz+PR3S+ak=' },
 ];
 
 export function encryptResolveToken(en: string) {
