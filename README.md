@@ -1,6 +1,6 @@
 # VidCore Stream Resolver
 
-Node.js **stream resolver** for [vidcore.net](https://vidcore.net): an embed **scraper**, encrypted catalog **API** client, and **HLS proxy** with an in-browser player. Pass a TMDB movie or TV id; the server reverse-engineers the site’s handshake, resolves M3U8 URLs per mirror, and plays (or exports) them.
+Node.js **stream resolver** for [vidcore.io](https://vidcore.io): an embed **scraper**, encrypted catalog **API** client, and **HLS proxy** with an in-browser player. Pass a TMDB movie or TV id; the server reverse-engineers the site’s handshake, resolves M3U8 URLs per mirror, and plays (or exports) them.
 
 A watch page is not the stream. The playlist never sits in the HTML. The official player scrapes its own embed payload, posts sealed tokens to opaque catalog endpoints, decrypts the response, then hits CDN hosts that reject ordinary browser requests from another origin. This repo implements that chain as a local scraper → resolver → proxy pipeline and a small REST API.
 
@@ -124,7 +124,7 @@ Direct M3U8 links often work in VLC or MPV when a referer can be set. The in-pag
 
 - **CORS** — CDN origins differ from the UI host; hls.js needs readable manifests and segments.
 - **Forbidden request headers** — page scripts cannot set `Referer` the way the CDN expects.
-- **Origin gating** — some `/vd/` endpoints return `403` for `Origin: http://localhost:…` and succeed when the request is made like the embed site. The proxy sits on the server, sends `Referer: https://vidcore.net/` (overridable), and adds CORS for the UI.
+- **Origin gating** — some `/vd/` endpoints return `403` for `Origin: http://localhost:…` and succeed when the request is made like the embed site. The proxy sits on the server, sends `Referer: https://vidcore.io/` (overridable), and adds CORS for the UI.
 
 The resolver therefore returns:
 
@@ -186,7 +186,7 @@ dist/                 built UI (gitignored)
 | --- | --- | --- |
 | `PORT` | `3000` | Listen port |
 | `HOST` | unset | Bind when set |
-| `VIDCORE_ORIGIN` | `https://vidcore.net` | Scraper / referer origin |
+| `VIDCORE_ORIGIN` | `https://vidcore.io` | Scraper / referer origin |
 | `USER_AGENT` | Chrome desktop | Upstream UA |
 
 ## Run
