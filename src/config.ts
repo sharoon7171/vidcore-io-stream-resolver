@@ -1,6 +1,6 @@
 export const port = Number(process.env.PORT) || 3000;
 
-export const siteOrigin = process.env.VIDCORE_ORIGIN || 'https://vidcore.net';
+export const siteOrigin = process.env.VIDCORE_ORIGIN || 'https://vidcore.io';
 
 export const siteReferer = `${siteOrigin}/`;
 
