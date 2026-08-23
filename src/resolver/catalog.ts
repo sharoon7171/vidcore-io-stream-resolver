@@ -2,10 +2,9 @@ import { encryptResolveToken } from './crypto/token.js';
 import { decryptResolvePayload } from './crypto/payload.js';
 import type { ScraperFetch } from '../scraper/session.js';
 
-const CATALOG_BASE =
-  '/838f93f8-02b6-5507-9b61-ab3717b54df2/a5022a41c59655396826d539c0a45fcf2396f987/1000063215035220/mo/n/e0ff7e8f0cbd036e8b03e8feb783f354c0b215853cc14afd119f9a3a2bab8aa2';
-const LIST_ACTION = 'sB2_etpff40';
-const STREAM_ACTION = '2ihd9UxHIsM';
+const CATALOG_BASE = '/ja/1000018218870967';
+const LIST_ACTION = 'E9AC6-y0Mng';
+const STREAM_ACTION = 'UnTuCgorJGE';
 
 export type CatalogServer = {
   name: string;
