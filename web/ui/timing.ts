@@ -1,37 +1,86 @@
-import { formatMs } from './dom.js';
+export function fmtMs(ms: number) {
+  return ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(2)}s`;
+}
 
-export function createPlayTimer(node: HTMLElement) {
-  let playTimer: { raf: number } | null = null;
+export function createTimers(resolveEl: HTMLElement, playEl: HTMLElement, panel: HTMLElement) {
+  let raf: number | null = null;
 
   function stop() {
-    if (playTimer) {
-      cancelAnimationFrame(playTimer.raf);
-      playTimer = null;
-    }
-    node.hidden = true;
+    if (raf === null) return;
+    cancelAnimationFrame(raf);
+    raf = null;
   }
 
-  function start() {
+  function showResolve(ms: number | null) {
+    panel.hidden = false;
+    if (ms === null) {
+      resolveEl.textContent = '—';
+      resolveEl.className = 'timing__val';
+      return;
+    }
+    resolveEl.textContent = fmtMs(ms);
+    resolveEl.className = 'timing__val is-done';
+  }
+
+  function showPlay(ms: number | null) {
+    panel.hidden = false;
+    if (ms === null) {
+      playEl.textContent = '—';
+      playEl.className = 'timing__val';
+      return;
+    }
+    playEl.textContent = fmtMs(ms);
+    playEl.className = 'timing__val is-done';
+  }
+
+  function beginResolve() {
     stop();
-    node.hidden = false;
-    node.textContent = 'First frame …';
-    node.className = 'play-timing is-live';
+    panel.hidden = false;
+    resolveEl.textContent = '0ms';
+    resolveEl.className = 'timing__val is-live';
+    playEl.textContent = '—';
+    playEl.className = 'timing__val';
     const t0 = performance.now();
     const tick = () => {
-      node.textContent = `First frame ${formatMs(performance.now() - t0)}`;
-      playTimer!.raf = requestAnimationFrame(tick);
+      resolveEl.textContent = fmtMs(performance.now() - t0);
+      raf = requestAnimationFrame(tick);
     };
-    playTimer = { raf: requestAnimationFrame(tick) };
-    return {
-      markPlay() {
-        if (!playTimer) return;
-        cancelAnimationFrame(playTimer.raf);
-        node.textContent = `First frame ${formatMs(performance.now() - t0)}`;
-        node.className = 'play-timing is-done';
-        playTimer = null;
-      },
+    raf = requestAnimationFrame(tick);
+    return stop;
+  }
+
+  function beginPlayback() {
+    stop();
+    playEl.textContent = '0ms';
+    playEl.className = 'timing__val is-live';
+    const t0 = performance.now();
+    const tick = () => {
+      playEl.textContent = fmtMs(performance.now() - t0);
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => {
+      stop();
+      const ms = performance.now() - t0;
+      playEl.textContent = fmtMs(ms);
+      playEl.className = 'timing__val is-done';
+      return ms;
     };
   }
 
-  return { start, stop };
+  function showServer(resolveMs: number | null, playMs: number | null) {
+    stop();
+    showResolve(resolveMs);
+    showPlay(playMs);
+  }
+
+  return {
+    beginResolve,
+    beginPlayback,
+    showServer,
+    hide: () => {
+      stop();
+      panel.hidden = true;
+    },
+  };
 }
