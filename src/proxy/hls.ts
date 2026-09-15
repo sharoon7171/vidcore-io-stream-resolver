@@ -83,6 +83,21 @@ function rewritePlaylist(text: string, base: string, origin: string, server: str
     .join('\n');
 }
 
+function absolutizePlaylist(text: string, base: string) {
+  return text
+    .split('\n')
+    .map((line) => {
+      const t = line.trim();
+      if (!t) return line;
+      if (t.startsWith('#')) {
+        if (!t.includes('URI="')) return line;
+        return t.replace(/URI="([^"]+)"/g, (_, uri: string) => `URI="${abs(uri, base)}"`);
+      }
+      return abs(t, base);
+    })
+    .join('\n');
+}
+
 function open(url: string, headers: Record<string, string>) {
   const u = new URL(url);
   const lib = u.protocol === 'https:' ? https : http;
@@ -201,12 +216,13 @@ async function serveProxyHls(
     throw new Error(`host ${host} not allowed for ${profile.name}`);
   }
 
+  const pathLooksPlaylist = new URL(target).pathname.toLowerCase().endsWith('.m3u8');
   const headers: Record<string, string> = {
     ...profile.headers,
     accept: '*/*',
     'accept-encoding': 'identity',
   };
-  if (req.headers.range) headers.range = String(req.headers.range);
+  if (req.headers.range && !pathLooksPlaylist) headers.range = String(req.headers.range);
 
   const up = await onceUpstream(target, headers);
   req.on('close', () => up.destroy());
@@ -217,7 +233,6 @@ async function serveProxyHls(
   }
 
   const upstreamType = up.headers['content-type'];
-  const pathLooksPlaylist = new URL(target).pathname.toLowerCase().endsWith('.m3u8');
 
   if (contentTypeIsPlaylist(upstreamType) || pathLooksPlaylist) {
     const body = rewritePlaylist((await readBuffer(up)).toString('utf8'), target, origin, profile.name);
@@ -256,8 +271,8 @@ function resolveProxyProfile(name: string): ServerProfile {
   return profile;
 }
 
-export function parseProxyPath(pathname: string): { server: string; url: string } | null {
-  const match = pathname.match(/^\/api\/hls\/([^/]+)\/([^/]+)$/);
+function parseTokenPath(pathname: string, kind: 'hls' | 'playlist'): { server: string; url: string } | null {
+  const match = pathname.match(new RegExp(`^/api/${kind}/([^/]+)/([^/]+)$`));
   if (!match) return null;
   const server = decodeURIComponent(match[1]!);
   const token = match[2]!;
@@ -266,16 +281,50 @@ export function parseProxyPath(pathname: string): { server: string; url: string 
   return { server, url };
 }
 
+export function parseProxyPath(pathname: string): { server: string; url: string } | null {
+  return parseTokenPath(pathname, 'hls');
+}
+
+export function parsePlaylistPath(pathname: string): { server: string; url: string } | null {
+  return parseTokenPath(pathname, 'playlist');
+}
+
 export function playbackForServer(origin: string, url: string, name: string) {
   const profile = profileByName(name);
   if (!profile) throw new Error(`unknown server: ${name}`);
+  const id = profile.needsProxy ? mintProxyId(url) : null;
   return {
     url,
     proxy: profile.needsProxy,
-    play: profile.needsProxy ? proxyPlaylistUrl(origin, url, profile.name) : null,
+    play: id ? `${origin}/api/hls/${encodeURIComponent(profile.name)}/${id}` : null,
+    external:
+      profile.directSegments && id
+        ? `${origin}/api/playlist/${encodeURIComponent(profile.name)}/${id}`
+        : null,
     referer: profile.refererRequired,
     directPlayable: profile.directPlayable,
   };
+}
+
+async function serveDirectPlaylist(res: ServerResponse, target: string, profile: ServerProfile) {
+  const host = new URL(target).hostname;
+  if (!profile.hosts.some((item) => host === item || host.endsWith(`.${item}`))) {
+    throw new Error(`host ${host} not allowed for ${profile.name}`);
+  }
+
+  const up = await onceUpstream(target, {
+    ...profile.headers,
+    accept: '*/*',
+    'accept-encoding': 'identity',
+  });
+  if (!up.statusCode || up.statusCode >= 400) {
+    const errBody = await readBuffer(up);
+    throw new Error(`upstream ${up.statusCode}: ${errBody.subarray(0, 120).toString('utf8')}`);
+  }
+
+  const raw = (await readBuffer(up)).toString('utf8');
+  if (!raw.includes('#EXTM3U')) throw new Error('upstream not a playlist');
+  writePlaylist(res, absolutizePlaylist(raw, target));
 }
 
 export async function serveProxyRequest(
@@ -295,6 +344,34 @@ export async function serveProxyRequest(
 
   try {
     await serveProxyHls(req, res, params.url, origin, profile);
+  } catch (err) {
+    if (!res.headersSent) {
+      res.writeHead(502, { 'Content-Type': 'text/plain' });
+      res.end(String((err as Error).message || err));
+    }
+  }
+}
+
+export async function servePlaylistRequest(
+  res: ServerResponse,
+  params: { url: string; server: string },
+) {
+  let profile: ServerProfile;
+  try {
+    profile = resolveProxyProfile(params.server);
+  } catch (err) {
+    res.writeHead(400, { 'Content-Type': 'text/plain' });
+    res.end((err as Error).message);
+    return;
+  }
+  if (!profile.directSegments) {
+    res.writeHead(400, { 'Content-Type': 'text/plain' });
+    res.end(`${profile.name} does not expose direct segments`);
+    return;
+  }
+
+  try {
+    await serveDirectPlaylist(res, params.url, profile);
   } catch (err) {
     if (!res.headersSent) {
       res.writeHead(502, { 'Content-Type': 'text/plain' });
