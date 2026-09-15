@@ -5,9 +5,6 @@
     "build:web": "rm -rf dist && tsc -p tsconfig.web.json && mkdir -p dist/styles && cp web/index.html dist/ && cp web/styles/app.css dist/styles/",
     "start": "npm run build:web && lsof -ti:${PORT:-3000} | xargs kill -9 2>/dev/null; tsx src/server.ts"
   },
-  "engines": {
-    "node": ">=20"
-  },
   "dependencies": {
     "hls.js": "^1.6.16"
   },
