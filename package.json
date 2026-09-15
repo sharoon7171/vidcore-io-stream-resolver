@@ -6,11 +6,12 @@
     "start": "npm run build:web && lsof -ti:${PORT:-3000} | xargs kill -9 2>/dev/null; tsx src/server.ts"
   },
   "dependencies": {
-    "hls.js": "^1.6.16"
+    "happy-dom": "^20.14.5",
+    "hls.js": "^1.7.3"
   },
   "devDependencies": {
-    "@types/node": "^25.2.3",
-    "tsx": "^4.21.0",
-    "typescript": "^5.9.3"
+    "@types/node": "^26.5.1",
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2"
   }
 }
