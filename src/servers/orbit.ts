@@ -7,6 +7,7 @@ export const orbit: ServerProfile = {
   directPlayable: false,
   refererRequired: true,
   abrMaster: false,
+  directSegments: true,
   segmentType: 'video/mp2t',
   headers: { ...vidcoreHeaders },
 };

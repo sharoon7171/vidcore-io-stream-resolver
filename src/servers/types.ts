@@ -7,6 +7,7 @@ export type ServerProfile = {
   directPlayable: boolean;
   refererRequired: boolean;
   abrMaster: boolean;
+  directSegments?: boolean;
   segmentType?: string;
   headers: Record<string, string>;
 };
