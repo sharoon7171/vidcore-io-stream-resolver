@@ -1,74 +1,137 @@
 import { playbackForServer } from '../proxy/servers.js';
-import { scrapeEmbedPage } from '../scraper/embed.js';
+import { scrapeEmbedPage, type EmbedSnapshot } from '../scraper/embed.js';
 import { createScraperFetch } from '../scraper/session.js';
+import { isServerName, profileByName, SERVER_ORDER } from '../servers/index.js';
+import { ensureMasterForAbr } from '../servers/ladder.js';
 import { listCatalogServers, unlockCatalogStream, type CatalogServer } from './catalog.js';
 import type { ResolveRequest } from './request.js';
 
-const ORDER = ['Orbit', 'Supreme', 'Prime', 'Premiere 4K', 'Horizon'];
+type CatalogReady = {
+  key: string;
+  embed: EmbedSnapshot;
+  servers: CatalogServer[];
+  scraperFetch: ReturnType<typeof createScraperFetch>;
+  at: number;
+};
+
+const CACHE_TTL_MS = 120_000;
+let catalogCache: CatalogReady | null = null;
+
+function requestKey(request: ResolveRequest) {
+  return request.kind === 'tv'
+    ? `tv:${request.id}:${request.season}:${request.episode}`
+    : `movie:${request.id}`;
+}
 
 function ordered(servers: CatalogServer[]) {
   const byName = new Map(servers.filter((s) => s?.data).map((s) => [s.name, s]));
-  return ORDER.map((name) => byName.get(name)).filter(Boolean) as CatalogServer[];
+  return SERVER_ORDER.map((name) => byName.get(name)).filter(Boolean) as CatalogServer[];
 }
 
-async function unlockOne(
+async function loadCatalog(request: ResolveRequest): Promise<CatalogReady> {
+  const key = requestKey(request);
+  if (catalogCache && catalogCache.key === key && Date.now() - catalogCache.at < CACHE_TTL_MS) {
+    return catalogCache;
+  }
+
+  const embed = await scrapeEmbedPage(request.kind, request.id, {
+    season: request.kind === 'tv' ? request.season : undefined,
+    episode: request.kind === 'tv' ? request.episode : undefined,
+  });
+  const scraperFetch = createScraperFetch(embed.referer, embed.jar);
+  const servers = ordered(await listCatalogServers(embed.en, scraperFetch, embed.referer));
+  if (!servers.length) throw Object.assign(new Error('server list empty'), { stage: 'resolve' });
+
+  catalogCache = { key, embed, servers, scraperFetch, at: Date.now() };
+  return catalogCache;
+}
+
+async function* unlockOne(
   server: CatalogServer,
   scraperFetch: ReturnType<typeof createScraperFetch>,
   origin: string,
+  en: string,
+  started: number,
 ) {
-  const started = Date.now();
   try {
-    const config = await unlockCatalogStream(server, scraperFetch);
-    return {
-      name: server.name,
-      ok: true as const,
-      ms: Date.now() - started,
-      ...playbackForServer(origin, config.url, server.name),
+    const config = await unlockCatalogStream(server, scraperFetch, en);
+    const profile = profileByName(server.name);
+    let url = config.url;
+    if (profile?.abrMaster) {
+      url = await ensureMasterForAbr(url, profile.headers);
+    }
+    yield {
+      event: 'server' as const,
+      server: {
+        name: server.name,
+        status: 'ok' as const,
+        ms: Date.now() - started,
+        ...playbackForServer(origin, url, server.name),
+      },
     };
-  } catch {
-    return { name: server.name, ok: false as const, ms: Date.now() - started };
+  } catch (err) {
+    yield {
+      event: 'server' as const,
+      server: {
+        name: server.name,
+        status: 'fail' as const,
+        ms: Date.now() - started,
+        error: err instanceof Error ? err.message : String(err),
+      },
+    };
   }
 }
 
-export async function* resolvePlayback(request: ResolveRequest, origin: string) {
-  let embed;
+export async function* resolvePlayback(request: ResolveRequest, origin: string, serverName: string) {
+  if (!isServerName(serverName)) {
+    yield { event: 'error' as const, stage: 'input', error: `unknown server: ${serverName}` };
+    return;
+  }
+
+  yield { event: 'server' as const, server: { name: serverName, status: 'loading' as const } };
+  const started = Date.now();
+
+  let catalog: CatalogReady;
   try {
-    embed = await scrapeEmbedPage(request.kind, request.id, {
-      season: request.kind === 'tv' ? request.season : undefined,
-      episode: request.kind === 'tv' ? request.episode : undefined,
-    });
+    catalog = await loadCatalog(request);
   } catch (err) {
     const e = err as Error & { stage?: string };
     yield { event: 'error' as const, stage: e.stage || 'resolve', error: e.message };
     return;
   }
 
-  yield { event: 'meta' as const, title: embed.meta.title, year: embed.meta.year };
+  yield {
+    event: 'meta' as const,
+    title: catalog.embed.meta.title,
+    year: catalog.embed.meta.year,
+  };
 
-  const scraperFetch = createScraperFetch(embed.referer, embed.jar);
-  let servers;
-  try {
-    servers = await listCatalogServers(embed.en, scraperFetch);
-  } catch (err) {
-    const e = err as Error & { stage?: string };
-    yield { event: 'error' as const, stage: e.stage || 'resolve', error: e.message };
+  const target = catalog.servers.find((s) => s.name === serverName);
+  if (!target) {
+    yield {
+      event: 'error' as const,
+      stage: 'resolve',
+      error: `${serverName} not in catalog`,
+    };
     return;
   }
 
-  const targets = ordered(servers);
-  if (!targets.length) {
-    yield { event: 'error' as const, stage: 'resolve', error: 'server list empty' };
-    return;
+  let failError: string | null = null;
+  for await (const evt of unlockOne(
+    target,
+    catalog.scraperFetch,
+    origin,
+    catalog.embed.en,
+    started,
+  )) {
+    yield evt;
+    if (evt.server.status === 'ok') return;
+    if (evt.server.status === 'fail') failError = evt.server.error;
   }
 
-  yield { event: 'serverlist' as const, servers: targets.map((s) => ({ name: s.name })) };
-
-  let found = false;
-  for (const server of targets) {
-    const result = await unlockOne(server, scraperFetch, origin);
-    yield { event: 'server' as const, server: result };
-    if (result.ok) found = true;
-  }
-
-  if (!found) yield { event: 'error' as const, stage: 'resolve', error: 'no working server' };
+  yield {
+    event: 'error' as const,
+    stage: 'resolve',
+    error: failError || `${serverName} failed to unlock`,
+  };
 }
