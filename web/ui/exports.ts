@@ -10,7 +10,7 @@ export type ExportFields = {
   mpv: HTMLInputElement;
 };
 
-export type ExportServer = {
+type ExportServer = {
   url: string;
   play: string | null;
   proxy: boolean;
@@ -38,23 +38,21 @@ export function bindExports(fields: ExportFields, entry: ExportServer, label: st
   }
 
   const title = `--force-media-title="${String(label).replace(/"/g, '\\"')}"`;
-  const external = entry.directPlayable ? entry.url : entry.play || entry.url;
-  const viaProxy = !entry.directPlayable && Boolean(entry.play);
 
-  if (viaProxy) {
-    fields.vlc.value = `vlc "${external}"`;
-    fields.mpv.value = `mpv ${title} "${external}"`;
+  if (entry.directPlayable) {
+    if (entry.referer) {
+      fields.vlc.value = `vlc --http-referrer='${REF}' --http-user-agent='${UA}' "${entry.url}"`;
+      fields.mpv.value = `mpv --referrer='${REF}' --user-agent='${UA}' ${title} "${entry.url}"`;
+    } else {
+      fields.vlc.value = `vlc "${entry.url}"`;
+      fields.mpv.value = `mpv ${title} "${entry.url}"`;
+    }
     return;
   }
 
-  if (entry.referer) {
-    fields.vlc.value = `vlc --http-referrer='${REF}' --http-user-agent='${UA}' "${external}"`;
-    fields.mpv.value = `mpv --referrer='${REF}' --user-agent='${UA}' ${title} "${external}"`;
-    return;
-  }
-
-  fields.vlc.value = `vlc "${external}"`;
-  fields.mpv.value = `mpv ${title} "${external}"`;
+  const proxied = entry.play || entry.url;
+  fields.vlc.value = `vlc "${proxied}"`;
+  fields.mpv.value = `mpv ${title} "${proxied}"`;
 }
 
 export function bindCopyButtons() {

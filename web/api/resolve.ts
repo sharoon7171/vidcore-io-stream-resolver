@@ -19,7 +19,7 @@ export type ResolveEvent =
     }
   | { event: 'error'; stage?: string; error?: string };
 
-export type OkServer = Extract<ResolveEvent, { event: 'server' }>['server'] & {
+type OkServer = Extract<ResolveEvent, { event: 'server' }>['server'] & {
   status: 'ok';
 };
 
