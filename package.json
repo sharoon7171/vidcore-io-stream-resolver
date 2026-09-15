@@ -1,5 +1,5 @@
 {
-  "name": "vidcore-hls-scraper-resolver",
+  "name": "vidcore-io-stream-resolver",
   "type": "module",
   "scripts": {
     "build:web": "rm -rf dist && tsc -p tsconfig.web.json && mkdir -p dist/styles && cp web/index.html dist/ && cp web/styles/app.css dist/styles/",
