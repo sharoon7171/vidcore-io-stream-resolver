@@ -15,7 +15,7 @@ export const SERVER_ORDER = [
   horizon.name,
 ] as const;
 
-export type ServerName = (typeof SERVER_ORDER)[number];
+type ServerName = (typeof SERVER_ORDER)[number];
 
 const servers: readonly ServerProfile[] = [orbit, supreme, prime, premiere, horizon];
 

@@ -1,4 +1,4 @@
-import { playbackForServer } from '../proxy/servers.js';
+import { playbackForServer } from '../proxy/hls.js';
 import { scrapeEmbedPage, type EmbedSnapshot } from '../scraper/embed.js';
 import { createScraperFetch } from '../scraper/session.js';
 import { isServerName, profileByName, SERVER_ORDER } from '../servers/index.js';
@@ -39,28 +39,27 @@ async function loadCatalog(request: ResolveRequest): Promise<CatalogReady> {
     episode: request.kind === 'tv' ? request.episode : undefined,
   });
   const scraperFetch = createScraperFetch(embed.referer, embed.jar);
-  const servers = ordered(await listCatalogServers(embed.en, scraperFetch, embed.referer));
+  const servers = ordered(await listCatalogServers(embed.en, scraperFetch));
   if (!servers.length) throw Object.assign(new Error('server list empty'), { stage: 'resolve' });
 
   catalogCache = { key, embed, servers, scraperFetch, at: Date.now() };
   return catalogCache;
 }
 
-async function* unlockOne(
+async function unlockServerEvent(
   server: CatalogServer,
   scraperFetch: ReturnType<typeof createScraperFetch>,
   origin: string,
-  en: string,
   started: number,
 ) {
   try {
-    const config = await unlockCatalogStream(server, scraperFetch, en);
+    const config = await unlockCatalogStream(server, scraperFetch);
     const profile = profileByName(server.name);
     let url = config.url;
     if (profile?.abrMaster) {
       url = await ensureMasterForAbr(url, profile.headers);
     }
-    yield {
+    return {
       event: 'server' as const,
       server: {
         name: server.name,
@@ -70,7 +69,7 @@ async function* unlockOne(
       },
     };
   } catch (err) {
-    yield {
+    return {
       event: 'server' as const,
       server: {
         name: server.name,
@@ -116,22 +115,13 @@ export async function* resolvePlayback(request: ResolveRequest, origin: string, 
     return;
   }
 
-  let failError: string | null = null;
-  for await (const evt of unlockOne(
-    target,
-    catalog.scraperFetch,
-    origin,
-    catalog.embed.en,
-    started,
-  )) {
-    yield evt;
-    if (evt.server.status === 'ok') return;
-    if (evt.server.status === 'fail') failError = evt.server.error;
-  }
+  const evt = await unlockServerEvent(target, catalog.scraperFetch, origin, started);
+  yield evt;
+  if (evt.server.status === 'ok') return;
 
   yield {
     event: 'error' as const,
     stage: 'resolve',
-    error: failError || `${serverName} failed to unlock`,
+    error: ('error' in evt.server && evt.server.error) || `${serverName} failed to unlock`,
   };
 }

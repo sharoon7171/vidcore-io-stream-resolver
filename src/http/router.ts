@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { serveProxyRequest, parseProxyPath } from '../proxy/servers.js';
+import { parseProxyPath, serveProxyRequest } from '../proxy/hls.js';
 import { parseResolveRequest } from '../resolver/request.js';
 import { resolvePlayback } from '../resolver/pipeline.js';
 import { serveStatic } from './static.js';
@@ -40,7 +40,7 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       const parsed = pathname === '/api/hls' ? null : parseProxyPath(pathname);
       if (!parsed) {
         res.writeHead(400, { 'Content-Type': 'text/plain' });
-        res.end('use /api/hls/{server}/{base64url}');
+        res.end('use /api/hls/{server}/{id}');
         return;
       }
       await serveProxyRequest(req, res, parsed, origin);
