@@ -1,33 +1,60 @@
 const REF = 'https://vidcore.io/';
+const UA =
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36';
 
-type Entry = {
-  url: string;
-  referer?: boolean;
-  play?: string;
-};
-
-type ExportEls = {
+export type ExportFields = {
   direct: HTMLInputElement;
-  vlc: HTMLInputElement;
-  mpv: HTMLInputElement;
   browser: HTMLInputElement;
   browserRow: HTMLElement;
+  vlc: HTMLInputElement;
+  mpv: HTMLInputElement;
 };
 
-export function bindExports(
-  els: ExportEls,
-  { entry, label, viaProxy }: { entry: Entry; label: string; viaProxy: boolean },
-) {
-  els.direct.value = entry.url;
-  els.vlc.value = entry.referer
-    ? `vlc --http-referrer='${REF}' "${entry.url}"`
-    : `vlc "${entry.url}"`;
+export type ExportServer = {
+  url: string;
+  play: string | null;
+  proxy: boolean;
+  referer: boolean;
+  directPlayable: boolean;
+};
+
+export function clearExports(fields: ExportFields) {
+  fields.direct.value = '';
+  fields.browser.value = '';
+  fields.vlc.value = '';
+  fields.mpv.value = '';
+  fields.browserRow.hidden = true;
+}
+
+export function bindExports(fields: ExportFields, entry: ExportServer, label: string) {
+  fields.direct.value = entry.url;
+  fields.browser.value = entry.proxy && entry.play ? entry.play : '';
+  fields.browserRow.hidden = !(entry.proxy && entry.play);
+
+  if (!entry.url) {
+    fields.vlc.value = '';
+    fields.mpv.value = '';
+    return;
+  }
+
   const title = `--force-media-title="${String(label).replace(/"/g, '\\"')}"`;
-  els.mpv.value = entry.referer
-    ? `mpv --referrer='${REF}' ${title} "${entry.url}"`
-    : `mpv ${title} "${entry.url}"`;
-  els.browser.value = viaProxy && entry.play ? entry.play : '';
-  els.browserRow.hidden = !(viaProxy && entry.play);
+  const external = entry.directPlayable ? entry.url : entry.play || entry.url;
+  const viaProxy = !entry.directPlayable && Boolean(entry.play);
+
+  if (viaProxy) {
+    fields.vlc.value = `vlc "${external}"`;
+    fields.mpv.value = `mpv ${title} "${external}"`;
+    return;
+  }
+
+  if (entry.referer) {
+    fields.vlc.value = `vlc --http-referrer='${REF}' --http-user-agent='${UA}' "${external}"`;
+    fields.mpv.value = `mpv --referrer='${REF}' --user-agent='${UA}' ${title} "${external}"`;
+    return;
+  }
+
+  fields.vlc.value = `vlc "${external}"`;
+  fields.mpv.value = `mpv ${title} "${external}"`;
 }
 
 export function bindCopyButtons() {
