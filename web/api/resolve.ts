@@ -12,6 +12,7 @@ export type ResolveEvent =
         ms: number;
         url: string;
         play: string | null;
+        external: string | null;
         proxy: boolean;
         referer: boolean;
         directPlayable: boolean;
@@ -83,6 +84,7 @@ export function applyOkFields(entry: ServerEntry, server: OkServer) {
   entry.resolveMs = server.ms;
   entry.url = server.url;
   entry.play = server.play;
+  entry.external = server.external;
   entry.proxy = server.proxy;
   entry.referer = server.referer;
   entry.directPlayable = server.directPlayable;

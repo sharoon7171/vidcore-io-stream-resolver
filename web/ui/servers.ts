@@ -7,6 +7,7 @@ export type ServerEntry = {
   playMs: number | null;
   url: string | null;
   play: string | null;
+  external: string | null;
   proxy: boolean;
   referer: boolean;
   directPlayable: boolean;
@@ -20,6 +21,7 @@ export function idleServers(): ServerEntry[] {
     playMs: null,
     url: null,
     play: null,
+    external: null,
     proxy: false,
     referer: false,
     directPlayable: false,

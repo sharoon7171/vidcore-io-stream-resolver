@@ -144,6 +144,7 @@ function showExports(entry: ServerEntry) {
     {
       url: entry.url,
       play: entry.play,
+      external: entry.external,
       proxy: entry.proxy,
       referer: entry.referer,
       directPlayable: entry.directPlayable,
@@ -156,6 +157,7 @@ function markResolveFail(entry: ServerEntry) {
   entry.status = 'fail';
   entry.url = null;
   entry.play = null;
+  entry.external = null;
   entry.proxy = false;
   entry.referer = false;
   entry.directPlayable = false;
@@ -206,6 +208,7 @@ function applyServerEvent(
     entry.playMs = null;
     entry.url = null;
     entry.play = null;
+    entry.external = null;
     entry.proxy = false;
     entry.referer = false;
     entry.directPlayable = false;
@@ -224,6 +227,7 @@ function applyServerEvent(
     entry.resolveMs = evt.server.ms;
     entry.url = null;
     entry.play = null;
+    entry.external = null;
     entry.proxy = false;
     entry.referer = false;
     entry.directPlayable = false;
