@@ -1,45 +1,33 @@
 import http from 'node:http';
 import https from 'node:https';
+import { Buffer } from 'node:buffer';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { pipeline } from 'node:stream/promises';
-import { userAgent, siteReferer } from '../config.js';
+import { profileByName, type ServerProfile } from '../servers/index.js';
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Expose-Headers': 'Content-Length, Content-Range, Accept-Ranges',
 };
 
-const httpsAgent = new https.Agent({ keepAlive: true, maxSockets: 16 });
-const httpAgent = new http.Agent({ keepAlive: true, maxSockets: 16 });
+const httpsAgent = new https.Agent({ keepAlive: true, maxSockets: 64 });
+const httpAgent = new http.Agent({ keepAlive: true, maxSockets: 64 });
+const REQ_MS = 30000;
 
-const MOON = 'moon.ironwallnet.net';
-const EDU = 'studyedu.site';
-const REQ_MS = 20000;
+function encodeProxyTarget(url: string) {
+  return Buffer.from(url).toString('base64url');
+}
+
+function decodeProxyTarget(encoded: string) {
+  return Buffer.from(encoded, 'base64url').toString('utf8');
+}
 
 export function proxyPlaylistUrl(origin: string, url: string, server: string) {
-  return `${origin}/api/hls?${new URLSearchParams({ url, server })}`;
-}
-
-function onMoon(url: string) {
-  const u = new URL(url);
-  if (u.pathname.startsWith('/vd/') && u.hostname !== MOON) {
-    u.protocol = 'https:';
-    u.host = MOON;
-  }
-  return u.href;
-}
-
-function onEdu(url: string) {
-  const u = new URL(url);
-  if (u.pathname.startsWith('/vd/')) {
-    u.protocol = 'https:';
-    u.host = EDU;
-  }
-  return u.href;
+  return `${origin}/api/hls/${encodeURIComponent(server)}/${encodeProxyTarget(url)}`;
 }
 
 function abs(uri: string, base: string) {
-  return onMoon(new URL(uri, base).href);
+  return new URL(uri, base).href;
 }
 
 function rewrite(text: string, base: string, origin: string, server: string) {
@@ -92,27 +80,6 @@ function onceUpstream(url: string, headers: Record<string, string>): Promise<Inc
   });
 }
 
-async function upstream(url: string, headers: Record<string, string>) {
-  const primary = onMoon(url);
-  try {
-    const res = await onceUpstream(primary, headers);
-    if (res.statusCode === 200 || res.statusCode === 206) return res;
-    res.resume();
-  } catch {
-  }
-
-  if (!new URL(url).pathname.startsWith('/vd/')) {
-    throw new Error('upstream failed');
-  }
-
-  const res = await onceUpstream(onEdu(url), headers);
-  if (res.statusCode !== 200 && res.statusCode !== 206) {
-    res.resume();
-    throw new Error(`upstream ${res.statusCode}`);
-  }
-  return res;
-}
-
 function readText(stream: IncomingMessage) {
   return new Promise<string>((resolve, reject) => {
     const chunks: Buffer[] = [];
@@ -127,18 +94,21 @@ export async function serveProxyHls(
   res: ServerResponse,
   target: string,
   origin: string,
-  server: string,
-  opts: { segmentType?: string } = {},
+  profile: ServerProfile,
 ) {
-  const headers: Record<string, string> = {
-    'user-agent': userAgent,
-    referer: siteReferer,
-    accept: '*/*',
-    ...(req.headers.range ? { range: String(req.headers.range) } : {}),
-  };
+  const host = new URL(target).hostname;
+  if (!profile.hosts.some((item) => host === item || host.endsWith(`.${item}`))) {
+    throw new Error(`host ${host} not allowed for ${profile.name}`);
+  }
 
   const playlist = new URL(target).pathname.endsWith('.m3u8');
-  const up = await upstream(target, headers);
+  const headers: Record<string, string> = {
+    ...profile.headers,
+    accept: '*/*',
+    ...(!playlist && req.headers.range ? { range: String(req.headers.range) } : {}),
+  };
+
+  const up = await onceUpstream(target, headers);
   req.on('close', () => up.destroy());
 
   if (playlist) {
@@ -146,8 +116,13 @@ export async function serveProxyHls(
       up.resume();
       throw new Error(`upstream ${up.statusCode}`);
     }
-    res.writeHead(200, { ...cors, 'Content-Type': 'application/vnd.apple.mpegurl' });
-    res.end(rewrite(await readText(up), target, origin, server));
+    const body = rewrite(await readText(up), target, origin, profile.name);
+    res.writeHead(200, {
+      ...cors,
+      'Content-Type': 'application/vnd.apple.mpegurl',
+      'Cache-Control': 'no-cache',
+    });
+    res.end(body);
     return;
   }
 
@@ -158,7 +133,8 @@ export async function serveProxyHls(
 
   const out: Record<string, string> = {
     ...cors,
-    'content-type': opts.segmentType || up.headers['content-type'] || 'application/octet-stream',
+    'content-type': profile.segmentType || up.headers['content-type'] || 'application/octet-stream',
+    'cache-control': 'public, max-age=60',
   };
   for (const name of ['content-length', 'content-range', 'accept-ranges'] as const) {
     if (up.headers[name]) out[name] = String(up.headers[name]);
@@ -169,4 +145,20 @@ export async function serveProxyHls(
   } catch {
     up.destroy();
   }
+}
+
+export function resolveProxyProfile(name: string): ServerProfile {
+  const profile = profileByName(name);
+  if (!profile) throw new Error(`no proxy profile for ${name}`);
+  if (!profile.needsProxy) throw new Error(`${name} does not use proxy`);
+  return profile;
+}
+
+export function parseProxyPath(pathname: string): { server: string; url: string } | null {
+  const match = pathname.match(/^\/api\/hls\/([^/]+)\/([^/]+)$/);
+  if (!match) return null;
+  return {
+    server: decodeURIComponent(match[1]!),
+    url: decodeProxyTarget(match[2]!),
+  };
 }

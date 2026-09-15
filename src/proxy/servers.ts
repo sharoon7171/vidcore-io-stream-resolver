@@ -1,57 +1,38 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { proxyPlaylistUrl, serveProxyHls } from './hls.js';
+import { profileByName } from '../servers/index.js';
+import { parseProxyPath, proxyPlaylistUrl, resolveProxyProfile, serveProxyHls } from './hls.js';
 
-type ProxyServerDef = {
-  name: string;
-  referer: boolean;
-  segmentType?: string;
-};
-
-const DEFS: ProxyServerDef[] = [
-  { name: 'Orbit', referer: true, segmentType: 'video/mp2t' },
-  { name: 'Supreme', referer: true },
-  { name: 'Prime', referer: false },
-  { name: 'Horizon', referer: true, segmentType: 'video/mp4' },
-];
-
-const byName = new Map(DEFS.map((d) => [d.name, d]));
+export { parseProxyPath };
 
 export function playbackForServer(origin: string, url: string, name: string) {
-  const def = byName.get(name);
-  if (!def) return { url, proxy: false, referer: false };
+  const profile = profileByName(name);
+  if (!profile) throw new Error(`unknown server: ${name}`);
   return {
     url,
-    proxy: true,
-    referer: def.referer,
-    play: proxyPlaylistUrl(origin, url, def.name),
+    proxy: profile.needsProxy,
+    play: profile.needsProxy ? proxyPlaylistUrl(origin, url, profile.name) : null,
+    referer: profile.refererRequired,
+    directPlayable: profile.directPlayable,
   };
 }
 
 export async function serveProxyRequest(
   req: IncomingMessage,
   res: ServerResponse,
-  params: URLSearchParams,
+  params: { url: string; server: string },
   origin: string,
 ) {
-  const target = params.get('url');
-  const name = params.get('server');
-  if (!target) {
+  let profile;
+  try {
+    profile = resolveProxyProfile(params.server);
+  } catch (err) {
     res.writeHead(400, { 'Content-Type': 'text/plain' });
-    res.end('url required');
-    return;
-  }
-
-  const def = name ? byName.get(name) : undefined;
-  if (!def) {
-    res.writeHead(400, { 'Content-Type': 'text/plain' });
-    res.end('proxy not required');
+    res.end((err as Error).message);
     return;
   }
 
   try {
-    await serveProxyHls(req, res, target, origin, def.name, {
-      segmentType: def.segmentType,
-    });
+    await serveProxyHls(req, res, params.url, origin, profile);
   } catch (err) {
     if (!res.headersSent) {
       res.writeHead(502, { 'Content-Type': 'text/plain' });
