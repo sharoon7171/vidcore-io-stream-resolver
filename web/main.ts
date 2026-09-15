@@ -1,13 +1,13 @@
 import { el } from './ui/dom.js';
-import { bindCopyButtons, bindExports } from './ui/exports.js';
+import { bindCopyButtons, bindExports, clearExports, type ExportFields } from './ui/exports.js';
 import { syncType, queryParams, type ResolveForm } from './ui/form.js';
+import { idleServers, renderServers, type ServerEntry } from './ui/servers.js';
+import { createTimers, fmtMs } from './ui/timing.js';
 import { createHlsPlayer } from './player/hls.js';
-import { fetchResolveStream, readNdjson } from './api/resolve.js';
-import { renderServers } from './ui/servers.js';
-import { createPlayTimer } from './ui/timing.js';
+import { applyOkFields, consumeResolve, type ResolveEvent } from './api/resolve.js';
 
-const form = el('form') as HTMLFormElement;
-const resolveForm: ResolveForm = {
+const formEl = el('form') as HTMLFormElement;
+const form: ResolveForm = {
   type: el('type') as HTMLSelectElement,
   id: el('id') as HTMLInputElement,
   idLabel: el('id-label'),
@@ -17,122 +17,332 @@ const resolveForm: ResolveForm = {
   season: el('season') as HTMLInputElement,
   episode: el('episode') as HTMLInputElement,
 };
-const panel = el('out');
+
 const heading = el('title');
 const err = el('err');
-const btn = form.querySelector('button')!;
-const exportEls = {
+const exportFields: ExportFields = {
   direct: el('direct') as HTMLInputElement,
   browser: el('browser') as HTMLInputElement,
   browserRow: el('export-browser'),
   vlc: el('vlc') as HTMLInputElement,
   mpv: el('mpv') as HTMLInputElement,
 };
+
 const serversEl = el('servers');
-const player = createHlsPlayer(el('video') as HTMLVideoElement);
-const timer = createPlayTimer(el('play-timing'));
+const player = createHlsPlayer(el('video') as HTMLVideoElement, el('quality') as HTMLSelectElement);
+const timers = createTimers(el('t-resolve'), el('t-play'), el('timing'));
 
 let lastLabel = '';
-let lastServers: Array<Record<string, unknown> & { name: string; ok?: boolean; play?: string; url?: string }> = [];
+let lastServers = idleServers();
 let lastActive = '';
-let playing = false;
-let viaProxy = false;
+let lastQuery = '';
+let selectGen = 0;
+let endResolveLive: (() => void) | null = null;
 
-function showErr(message: string) {
-  err.textContent = message;
+function errText(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function clearErr() {
+  err.textContent = '';
+  err.hidden = true;
+}
+
+function showResolveError(message: string) {
+  err.textContent = `Resolve error: ${message}`;
   err.hidden = false;
 }
 
-function selectServer(name: string) {
-  const entry = lastServers.find((s) => s.name === name);
-  if (!entry?.ok) return null;
-  lastActive = name;
-  viaProxy = Boolean(entry.play);
-  heading.textContent = `${lastLabel} · ${name}`;
-  renderServers(serversEl, lastServers, lastActive);
-  bindExports(exportEls, { entry: entry as { url: string; referer?: boolean; play?: string }, label: lastLabel, viaProxy });
+function showPlaybackError(message: string) {
+  err.textContent = `Playback error: ${message}`;
+  err.hidden = false;
+}
+
+function paint() {
+  renderServers(serversEl, lastServers, lastActive, fmtMs);
+}
+
+function findServer(name: string): ServerEntry {
+  const entry = lastServers.find((item) => item.name === name);
+  if (!entry) throw new Error(`unknown server: ${name}`);
   return entry;
 }
 
-async function playEntry(entry: { play?: string; url?: string }) {
-  viaProxy = Boolean(entry.play);
-  bindExports(exportEls, {
-    entry: entry as { url: string; referer?: boolean; play?: string },
-    label: lastLabel,
-    viaProxy,
-  });
-  const clock = timer.start();
+function mediaSource(entry: ServerEntry): string {
+  if (!entry.url) throw new Error(`${entry.name} has no stream URL`);
+  if (entry.proxy) {
+    if (!entry.play) throw new Error(`${entry.name} is missing a proxy URL`);
+    return entry.play;
+  }
+  return entry.url;
+}
+
+function live(gen: number) {
+  return gen === selectGen;
+}
+
+function formQuery() {
+  return queryParams(form).toString();
+}
+
+function validateForm(): string | null {
+  const id = form.id.value.trim();
+  if (!id || !/^\d+$/.test(id)) return 'enter a valid TMDB id';
+  if (form.type.value === 'tv') {
+    const season = form.season.value.trim();
+    const episode = form.episode.value.trim();
+    if (!season || !/^\d+$/.test(season)) return 'enter a valid season';
+    if (!episode || !/^\d+$/.test(episode)) return 'enter a valid episode';
+  }
+  return null;
+}
+
+function resetPlayback() {
+  player.stop();
+  clearExports(exportFields);
+  endResolveLive?.();
+  endResolveLive = null;
+}
+
+function invalidateIfQueryChanged() {
+  const query = formQuery();
+  if (query === lastQuery) return;
+  lastQuery = query;
+  lastServers = idleServers();
+  lastActive = '';
+  lastLabel = '';
+  heading.textContent = 'Stream';
+  resetPlayback();
+  clearErr();
+  timers.hide();
+  paint();
+}
+
+function selectServer(entry: ServerEntry): number {
+  selectGen += 1;
+  resetPlayback();
+  clearErr();
+  lastActive = entry.name;
+  heading.textContent = lastLabel ? `${lastLabel} · ${entry.name}` : entry.name;
+  paint();
+  if (entry.status === 'ok') {
+    timers.showServer(entry.resolveMs, entry.playMs);
+    showExports(entry);
+  } else {
+    endResolveLive = timers.beginResolve();
+  }
+  return selectGen;
+}
+
+function showExports(entry: ServerEntry) {
+  if (!entry.url) {
+    clearExports(exportFields);
+    return;
+  }
+  bindExports(
+    exportFields,
+    {
+      url: entry.url,
+      play: entry.play,
+      proxy: entry.proxy,
+      referer: entry.referer,
+      directPlayable: entry.directPlayable,
+    },
+    lastLabel,
+  );
+}
+
+function markResolveFail(entry: ServerEntry) {
+  entry.status = 'fail';
+  entry.url = null;
+  entry.play = null;
+  entry.proxy = false;
+  entry.referer = false;
+  entry.directPlayable = false;
+  entry.playMs = null;
+  player.stop();
+  clearExports(exportFields);
+  timers.showServer(entry.resolveMs, null);
+  paint();
+}
+
+function markPlaybackFail(entry: ServerEntry) {
+  entry.playMs = null;
+  player.stop();
+  timers.showServer(entry.resolveMs, null);
+  showExports(entry);
+  paint();
+}
+
+async function playEntry(entry: ServerEntry, gen: number) {
+  if (!live(gen) || entry.status !== 'ok' || !entry.url) return;
+  showExports(entry);
+  timers.showServer(entry.resolveMs, null);
+  const endPlay = timers.beginPlayback();
   try {
-    await player.play(viaProxy ? entry.play! : entry.url!);
-    err.hidden = true;
-    clock.markPlay();
-  } catch (e) {
-    timer.stop();
-    throw e;
+    await player.play(mediaSource(entry));
+    if (!live(gen)) {
+      endPlay();
+      return;
+    }
+    entry.playMs = endPlay();
+    timers.showServer(entry.resolveMs, entry.playMs);
+  } catch (error) {
+    endPlay();
+    if (live(gen)) throw error;
   }
 }
 
-bindCopyButtons();
+function applyServerEvent(
+  evt: Extract<ResolveEvent, { event: 'server' }>,
+  gen: number,
+): ServerEntry {
+  const entry = findServer(evt.server.name);
+  if (!live(gen)) return entry;
 
-serversEl.addEventListener('click', async (event) => {
-  const node = (event.target as HTMLElement).closest('[data-name]') as HTMLButtonElement | null;
-  if (!node || node.disabled || node.dataset.name === lastActive) return;
-  const entry = selectServer(node.dataset.name!);
-  if (!entry) return;
-  err.hidden = true;
-  try {
-    await playEntry(entry);
-  } catch (e) {
-    showErr((e as Error).message);
+  if (evt.server.status === 'loading') {
+    entry.status = 'loading';
+    entry.resolveMs = null;
+    entry.playMs = null;
+    entry.url = null;
+    entry.play = null;
+    entry.proxy = false;
+    entry.referer = false;
+    entry.directPlayable = false;
+    if (!endResolveLive) endResolveLive = timers.beginResolve();
+    lastActive = entry.name;
+    heading.textContent = lastLabel ? `${lastLabel} · ${entry.name}` : entry.name;
+    clearExports(exportFields);
+    paint();
+    return entry;
   }
-});
 
-resolveForm.type.addEventListener('change', () => syncType(resolveForm));
-syncType(resolveForm);
+  if (evt.server.status === 'fail') {
+    endResolveLive?.();
+    endResolveLive = null;
+    entry.status = 'fail';
+    entry.resolveMs = evt.server.ms;
+    entry.url = null;
+    entry.play = null;
+    entry.proxy = false;
+    entry.referer = false;
+    entry.directPlayable = false;
+    entry.playMs = null;
+    clearExports(exportFields);
+    timers.showServer(entry.resolveMs, null);
+    paint();
+    return entry;
+  }
 
-form.addEventListener('submit', async (event) => {
-  event.preventDefault();
-  btn.disabled = true;
-  err.hidden = true;
-  panel.hidden = true;
-  player.stop();
-  timer.stop();
-  lastServers = [];
-  lastActive = '';
-  playing = false;
-  viaProxy = false;
-  try {
-    const res = await fetchResolveStream(queryParams(resolveForm));
-    await readNdjson(res, (evt) => {
-      if (evt.event === 'error') throw new Error(`${evt.stage || 'error'}: ${evt.error || 'resolve failed'}`);
+  endResolveLive?.();
+  endResolveLive = null;
+  applyOkFields(entry, evt.server);
+  showExports(entry);
+  paint();
+  return entry;
+}
+
+async function openNamed(name: string, gen: number): Promise<ServerEntry> {
+  let resolved: ServerEntry | null = null;
+  let resolveError: string | null = null;
+
+  await consumeResolve(
+    `/api/resolve?${queryParams(form)}&server=${encodeURIComponent(name)}`,
+    async (evt) => {
+      if (!live(gen)) return;
+      if (evt.event === 'error') {
+        resolveError = evt.error || 'resolve failed';
+        throw new Error(resolveError);
+      }
       if (evt.event === 'meta') {
         lastLabel = evt.year ? `${evt.title} (${evt.year})` : String(evt.title);
-        panel.hidden = false;
-        heading.textContent = lastLabel;
+        heading.textContent = `${lastLabel} · ${name}`;
+        return;
       }
-      if (evt.event === 'serverlist') {
-        const list = evt.servers as Array<{ name: string }>;
-        lastServers = list.map((s) => ({ name: s.name }));
-        renderServers(serversEl, lastServers, lastActive);
+      const next = applyServerEvent(evt, gen);
+      if (evt.server.status === 'fail') {
+        resolveError = evt.server.error || `${name} failed to resolve`;
       }
-      if (evt.event === 'server') {
-        const server = evt.server as (typeof lastServers)[number];
-        const idx = lastServers.findIndex((s) => s.name === server.name);
-        if (idx >= 0) lastServers[idx] = server;
-        else lastServers.push(server);
-        renderServers(serversEl, lastServers, lastActive);
-        if (server.ok && !playing) {
-          playing = true;
-          selectServer(server.name);
-          playEntry(server).catch((e) => showErr((e as Error).message));
-        }
+      if (next.status === 'ok') resolved = next;
+    },
+  );
+
+  if (!live(gen)) throw new Error('cancelled');
+  if (!resolved) throw new Error(resolveError || `${name} failed to resolve`);
+  return resolved;
+}
+
+bindCopyButtons();
+form.type.addEventListener('change', () => {
+  syncType(form);
+  invalidateIfQueryChanged();
+});
+for (const input of [form.id, form.season, form.episode]) {
+  input.addEventListener('input', () => invalidateIfQueryChanged());
+  input.addEventListener('change', () => invalidateIfQueryChanged());
+}
+syncType(form);
+lastQuery = formQuery();
+timers.hide();
+paint();
+
+formEl.addEventListener('submit', (event) => {
+  event.preventDefault();
+});
+
+serversEl.addEventListener('click', (event) => {
+  void (async () => {
+    const node = (event.target as HTMLElement).closest('[data-name]');
+    if (!(node instanceof HTMLButtonElement)) return;
+    const name = node.dataset.name;
+    if (!name) return;
+
+    const invalid = validateForm();
+    if (invalid) {
+      showResolveError(invalid);
+      return;
+    }
+
+    invalidateIfQueryChanged();
+    const entry = findServer(name);
+    if (name === lastActive && entry.status === 'loading') return;
+
+    const gen = selectServer(entry);
+
+    if (entry.status === 'ok') {
+      try {
+        await playEntry(entry, gen);
+        if (live(gen)) clearErr();
+      } catch (error) {
+        if (!live(gen)) return;
+        markPlaybackFail(entry);
+        showPlaybackError(errText(error));
       }
-    });
-    if (!lastServers.some((s) => s.ok)) throw new Error('no working server');
-  } catch (e) {
-    timer.stop();
-    showErr((e as Error).message);
-  } finally {
-    btn.disabled = false;
-  }
+      return;
+    }
+
+    let resolved: ServerEntry;
+    try {
+      resolved = await openNamed(name, gen);
+    } catch (error) {
+      if (!live(gen)) return;
+      endResolveLive?.();
+      endResolveLive = null;
+      const current = findServer(name);
+      if (current.status !== 'fail') markResolveFail(current);
+      showResolveError(errText(error));
+      return;
+    }
+
+    if (!live(gen)) return;
+
+    try {
+      await playEntry(resolved, gen);
+      if (live(gen)) clearErr();
+    } catch (error) {
+      if (!live(gen)) return;
+      markPlaybackFail(resolved);
+      showPlaybackError(errText(error));
+    }
+  })();
 });
