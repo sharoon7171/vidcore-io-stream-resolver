@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="description" content="Resolve HLS stream URLs from vidcore.io by TMDB movie or TV ID. Play in the browser or export links for VLC and MPV.">
-  <title>VidCore HLS Stream Resolver</title>
+  <meta name="description" content="HLS stream resolver for vidcore.io. Resolve by TMDB movie or TV ID, play in the browser, or export for VLC and MPV.">
+  <title>vidcore.io HLS Stream Resolver</title>
   <link rel="stylesheet" href="/styles/app.css">
   <script type="importmap">
   {
@@ -17,8 +17,8 @@
 <body>
   <div class="app">
     <header class="top">
-      <h1 class="top__title">VidCore HLS Stream Resolver</h1>
-      <p class="top__desc">Resolve HLS stream URLs from <a href="https://vidcore.io" target="_blank" rel="noopener noreferrer">vidcore.io</a> by TMDB movie or TV ID. Play in the browser or export links for VLC and MPV.</p>
+      <h1 class="top__title">vidcore.io HLS Stream Resolver</h1>
+      <p class="top__desc">Resolve HLS stream URLs from <a href="https://vidcore.io/" target="_blank" rel="noopener noreferrer">vidcore.io</a> by TMDB movie or TV ID. Enter an ID, click a server to resolve and play, then export for VLC and MPV.</p>
     </header>
 
     <section class="card">
@@ -45,27 +45,42 @@
               <input id="episode" type="text" inputmode="numeric" placeholder="1">
             </label>
           </div>
-          <button type="submit">Resolve</button>
         </div>
         <p class="resolve__hint" id="hint-movie">Movie — TMDB ID only, e.g. <code>550</code></p>
         <p class="resolve__hint" id="hint-tv" hidden>TV — TMDB ID plus season and episode, e.g. <code>44217</code> · S1 · E1</p>
       </form>
       <p id="err" class="msg msg--err" hidden></p>
+      <ul id="timing" class="timing" hidden>
+        <li>
+          <span class="timing__label">Resolve</span>
+          <span id="t-resolve" class="timing__val">—</span>
+        </li>
+        <li>
+          <span class="timing__label">First Frame</span>
+          <span id="t-play" class="timing__val">—</span>
+        </li>
+      </ul>
     </section>
 
-    <section id="out" class="stack" hidden>
+    <section id="out" class="stack">
       <div class="card">
-        <h2 id="title" class="stream-title">Stream</h2>
-        <p id="play-timing" class="play-timing" hidden></p>
-        <div class="player">
-          <div id="player"><video id="video" controls playsinline></video></div>
-        </div>
+        <h3 class="section-title">Servers</h3>
+        <div id="servers" class="servers"></div>
       </div>
 
       <div class="card">
-        <h3 class="section-title">Servers</h3>
-        <p class="servers__hint">Resolve time shown per server</p>
-        <div id="servers" class="servers"></div>
+        <h2 id="title" class="stream-title">Stream</h2>
+        <div class="player-toolbar">
+          <label class="quality">
+            <span class="quality__label">Quality</span>
+            <select id="quality" disabled>
+              <option value="-1">Auto</option>
+            </select>
+          </label>
+        </div>
+        <div class="player">
+          <div id="player"><video id="video" controls playsinline></video></div>
+        </div>
       </div>
 
       <div class="card">
@@ -74,7 +89,7 @@
           <li>
             <div class="export__meta">
               <span class="export__name">Direct URL</span>
-              <span class="export__hint">Upstream M3U8 URL</span>
+              <span class="export__hint">Upstream M3U8 — use in VLC / MPV</span>
             </div>
             <div class="export__row">
               <input id="direct" readonly>
@@ -94,7 +109,7 @@
           <li>
             <div class="export__meta">
               <span class="export__name">VLC</span>
-              <span class="export__hint">VLC — referer added only when required</span>
+              <span class="export__hint">Playable command — proxy URL when CDN blocks players</span>
             </div>
             <div class="export__row">
               <input id="vlc" readonly>
@@ -104,7 +119,7 @@
           <li>
             <div class="export__meta">
               <span class="export__name">MPV</span>
-              <span class="export__hint">MPV — referer added only when required</span>
+              <span class="export__hint">Playable command — proxy URL when CDN blocks players</span>
             </div>
             <div class="export__row">
               <input id="mpv" readonly>
