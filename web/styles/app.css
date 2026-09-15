@@ -215,18 +215,40 @@ button.ok {
   color: var(--err);
 }
 
-.play-timing {
-  margin: 0 0 10px;
-  font: 0.82rem/1.4 var(--mono);
-  font-variant-numeric: tabular-nums;
+.timing {
+  list-style: none;
+  margin: 14px 0 0;
+  padding: 12px 14px;
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+
+.timing li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.timing__label {
+  font-size: 0.82rem;
   color: var(--muted);
 }
 
-.play-timing.is-live {
+.timing__val {
+  font: 0.9rem/1.2 var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.timing__val.is-live {
   color: var(--accent);
 }
 
-.play-timing.is-done {
+.timing__val.is-done {
   color: var(--ok);
 }
 
@@ -235,6 +257,35 @@ button.ok {
   font-size: 1.05rem;
   font-weight: 600;
   word-break: break-word;
+}
+
+.player-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin: 0 0 10px;
+}
+
+.quality {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.quality select {
+  min-width: 8.5rem;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+}
+
+.quality select:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .section-title {
@@ -271,12 +322,6 @@ button.ok {
   gap: 8px;
 }
 
-.servers__hint {
-  margin: -6px 0 12px;
-  font-size: 0.78rem;
-  color: var(--muted);
-}
-
 .badge {
   display: inline-flex;
   align-items: center;
@@ -304,52 +349,38 @@ button.ok {
   color: var(--accent);
 }
 
-.badge__name {
-  font-weight: 600;
+.badge--ok {
+  border-color: rgba(107, 203, 119, 0.55);
 }
 
-.badge__icon {
-  width: 1em;
-  font-weight: 700;
-  text-align: center;
-}
-
-.badge--pending {
-  opacity: 0.75;
-  cursor: wait;
-}
-
-.badge--pending .badge__icon {
-  color: var(--accent);
-}
-
-.badge--ok .badge__icon {
+.badge--ok .badge__mark {
   color: var(--ok);
 }
 
 .badge--fail {
-  opacity: 0.55;
-  cursor: not-allowed;
+  border-color: rgba(240, 113, 120, 0.55);
 }
 
-.badge--fail .badge__icon {
+.badge--fail .badge__mark {
   color: var(--err);
+}
+
+.badge--loading {
+  opacity: 0.75;
+  cursor: wait;
 }
 
 .badge:disabled {
   pointer-events: none;
 }
 
-.badge__tag {
-  font-size: 0.72rem;
-  font-weight: 500;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--muted);
+.badge__mark {
+  font: 0.78rem/1 var(--mono);
+  font-weight: 700;
 }
 
-.badge--active .badge__tag {
-  color: var(--accent);
+.badge__name {
+  font-weight: 600;
 }
 
 .badge__ms {
