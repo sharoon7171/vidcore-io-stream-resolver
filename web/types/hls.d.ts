@@ -2,6 +2,7 @@ declare module 'hls.js' {
   export type ErrorData = {
     fatal: boolean;
     details: string;
+    type?: string;
     error?: Error;
   };
 
@@ -27,12 +28,20 @@ declare module 'hls.js' {
       LEVEL_SWITCHED: string;
       ERROR: string;
     };
+    static ErrorTypes: {
+      NETWORK_ERROR: string;
+      MEDIA_ERROR: string;
+    };
     constructor(config?: {
       enableWorker?: boolean;
       lowLatencyMode?: boolean;
       startFragPrefetch?: boolean;
       testBandwidth?: boolean;
+      abrEwmaDefaultEstimate?: number;
+      abrBandWidthFactor?: number;
+      abrBandWidthUpFactor?: number;
       startLevel?: number;
+      capLevelToPlayerSize?: boolean;
       maxBufferLength?: number;
       maxMaxBufferLength?: number;
       maxBufferSize?: number;
@@ -40,6 +49,9 @@ declare module 'hls.js' {
       backBufferLength?: number;
       fragLoadingTimeOut?: number;
       manifestLoadingTimeOut?: number;
+      fragLoadingMaxRetry?: number;
+      levelLoadingMaxRetry?: number;
+      progressive?: boolean;
     });
     readonly levels: Level[];
     readonly autoLevelEnabled: boolean;
@@ -51,6 +63,8 @@ declare module 'hls.js' {
     off(event: string, cb: (...args: any[]) => void): void;
     attachMedia(media: HTMLMediaElement): void;
     loadSource(source: string): void;
+    startLoad(startPosition?: number): void;
+    recoverMediaError(): void;
     destroy(): void;
   }
 }

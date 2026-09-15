@@ -1,8 +1,11 @@
 import Hls, { type ErrorData, type Level } from 'hls.js';
 
 function levelLabel(level: Level) {
-  if (level.height > 0) return `${level.height}p`;
-  if (level.bitrate > 0) return `${Math.round(level.bitrate / 1000)} kbps`;
+  const height = level.height > 0 ? `${level.height}p` : '';
+  const kbps = level.bitrate > 0 ? `${Math.round(level.bitrate / 1000)} kbps` : '';
+  if (height && kbps) return `${height} · ${kbps}`;
+  if (height) return height;
+  if (kbps) return kbps;
   if (level.name) return level.name;
   return 'Source';
 }
@@ -100,14 +103,21 @@ export function createHlsPlayer(video: HTMLVideoElement, quality: HTMLSelectElem
         lowLatencyMode: false,
         startFragPrefetch: true,
         testBandwidth: true,
+        abrEwmaDefaultEstimate: 800_000,
+        abrBandWidthFactor: 0.7,
+        abrBandWidthUpFactor: 0.6,
         startLevel: -1,
-        maxBufferLength: 30,
-        maxMaxBufferLength: 120,
-        maxBufferSize: 100 * 1000 * 1000,
+        capLevelToPlayerSize: true,
+        maxBufferLength: 18,
+        maxMaxBufferLength: 60,
+        maxBufferSize: 40 * 1000 * 1000,
         maxBufferHole: 0.5,
-        backBufferLength: 30,
+        backBufferLength: 20,
         fragLoadingTimeOut: 20000,
-        manifestLoadingTimeOut: 15000,
+        manifestLoadingTimeOut: 20000,
+        fragLoadingMaxRetry: 4,
+        levelLoadingMaxRetry: 3,
+        progressive: true,
       });
 
       hls.on(Hls.Events.MANIFEST_PARSED, (_event, data) => {
@@ -126,7 +136,16 @@ export function createHlsPlayer(video: HTMLVideoElement, quality: HTMLSelectElem
       });
 
       hls.on(Hls.Events.ERROR, (_event, data: ErrorData) => {
-        if (data.fatal) fail(data.error?.message || String(data.details));
+        if (!data.fatal || !hls) return;
+        if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+          hls.startLoad();
+          return;
+        }
+        if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+          hls.recoverMediaError();
+          return;
+        }
+        fail(data.error?.message || String(data.details));
       });
 
       hls.attachMedia(video);
