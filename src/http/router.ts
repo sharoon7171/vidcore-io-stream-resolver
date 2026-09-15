@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { serveProxyRequest } from '../proxy/servers.js';
+import { serveProxyRequest, parseProxyPath } from '../proxy/servers.js';
 import { parseResolveRequest } from '../resolver/request.js';
 import { resolvePlayback } from '../resolver/pipeline.js';
 import { serveStatic } from './static.js';
@@ -36,13 +36,24 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse) {
   const { pathname, searchParams, origin } = new URL(req.url ?? '/', `http://${req.headers.host}`);
 
   try {
-    if (pathname === '/api/hls') {
-      await serveProxyRequest(req, res, searchParams, origin);
+    if (pathname === '/api/hls' || pathname.startsWith('/api/hls/')) {
+      const parsed = pathname === '/api/hls' ? null : parseProxyPath(pathname);
+      if (!parsed) {
+        res.writeHead(400, { 'Content-Type': 'text/plain' });
+        res.end('use /api/hls/{server}/{base64url}');
+        return;
+      }
+      await serveProxyRequest(req, res, parsed, origin);
       return;
     }
 
     if (pathname === '/api/resolve') {
       try {
+        const server = searchParams.get('server');
+        if (!server) {
+          json(res, 400, { ok: false, stage: 'input', error: 'server required' });
+          return;
+        }
         await ndjson(
           res,
           resolvePlayback(
@@ -53,6 +64,7 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse) {
               episode: searchParams.get('episode'),
             }),
             origin,
+            server,
           ),
         );
       } catch (err) {
