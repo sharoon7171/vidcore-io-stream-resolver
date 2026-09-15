@@ -1,22 +1,61 @@
-import { formatMs } from './dom.js';
+export const SERVER_ORDER = ['Orbit', 'Supreme', 'Prime', 'Premiere 4K', 'Horizon'] as const;
 
-type ServerEntry = {
+export type ServerEntry = {
   name: string;
-  ok?: boolean;
-  ms?: number;
+  status: 'idle' | 'loading' | 'ok' | 'fail';
+  resolveMs: number | null;
+  playMs: number | null;
+  url: string | null;
+  play: string | null;
+  proxy: boolean;
+  referer: boolean;
+  directPlayable: boolean;
 };
 
-export function renderServers(node: HTMLElement, servers: ServerEntry[], active: string) {
-  node.innerHTML = servers
+export function idleServers(): ServerEntry[] {
+  return SERVER_ORDER.map((name) => ({
+    name,
+    status: 'idle' as const,
+    resolveMs: null,
+    playMs: null,
+    url: null,
+    play: null,
+    proxy: false,
+    referer: false,
+    directPlayable: false,
+  }));
+}
+
+export function renderServers(
+  root: HTMLElement,
+  servers: ServerEntry[],
+  active: string,
+  fmtMs: (ms: number) => string,
+) {
+  root.innerHTML = servers
     .map((entry) => {
       const picked = entry.name === active ? ' badge--active' : '';
       const state =
-        entry.ok === true ? ' badge--ok' : entry.ok === false ? ' badge--fail' : ' badge--pending';
-      const icon = entry.ok === true ? '✓' : entry.ok === false ? '✕' : '…';
-      const disabled = entry.ok === false ? ' disabled' : '';
-      const ms = entry.ms != null ? formatMs(entry.ms) : '…';
-      return `<button type="button" class="badge${picked}${state}" data-name="${entry.name}"${disabled}><span class="badge__icon" aria-hidden="true">${icon}</span><span class="badge__name">${entry.name}</span><span class="badge__ms">${ms}</span></button>`;
+        entry.status === 'ok'
+          ? ' badge--ok'
+          : entry.status === 'fail'
+            ? ' badge--fail'
+            : entry.status === 'loading'
+              ? ' badge--loading'
+              : '';
+      const mark =
+        entry.status === 'ok'
+          ? '<span class="badge__mark">✓</span>'
+          : entry.status === 'fail'
+            ? '<span class="badge__mark">✕</span>'
+            : entry.status === 'loading'
+              ? '<span class="badge__mark">…</span>'
+              : '';
+      const ms =
+        entry.resolveMs !== null
+          ? `<span class="badge__ms">${fmtMs(entry.resolveMs)}</span>`
+          : '';
+      return `<button type="button" class="badge${state}${picked}" data-name="${entry.name}"${entry.status === 'loading' ? ' disabled' : ''}>${mark}<span class="badge__name">${entry.name}</span>${ms}</button>`;
     })
     .join('');
-  (node.closest('.card') as HTMLElement).hidden = servers.length === 0;
 }
