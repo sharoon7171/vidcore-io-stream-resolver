@@ -2,7 +2,7 @@ export function fmtMs(ms: number) {
   return ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(2)}s`;
 }
 
-export function createTimers(resolveEl: HTMLElement, playEl: HTMLElement, panel: HTMLElement) {
+export function createTimers(resolveEl: HTMLElement, playEl: HTMLElement) {
   let raf: number | null = null;
 
   function stop() {
@@ -11,35 +11,20 @@ export function createTimers(resolveEl: HTMLElement, playEl: HTMLElement, panel:
     raf = null;
   }
 
-  function showResolve(ms: number | null) {
-    panel.hidden = false;
+  function paint(el: HTMLElement, ms: number | null, live = false) {
     if (ms === null) {
-      resolveEl.textContent = '—';
-      resolveEl.className = 'timing__val';
+      el.textContent = '—';
+      el.className = 'time__val';
       return;
     }
-    resolveEl.textContent = fmtMs(ms);
-    resolveEl.className = 'timing__val is-done';
-  }
-
-  function showPlay(ms: number | null) {
-    panel.hidden = false;
-    if (ms === null) {
-      playEl.textContent = '—';
-      playEl.className = 'timing__val';
-      return;
-    }
-    playEl.textContent = fmtMs(ms);
-    playEl.className = 'timing__val is-done';
+    el.textContent = fmtMs(ms);
+    el.className = live ? 'time__val is-live' : 'time__val is-done';
   }
 
   function beginResolve() {
     stop();
-    panel.hidden = false;
-    resolveEl.textContent = '0ms';
-    resolveEl.className = 'timing__val is-live';
-    playEl.textContent = '—';
-    playEl.className = 'timing__val';
+    paint(resolveEl, 0, true);
+    paint(playEl, null);
     const t0 = performance.now();
     const tick = () => {
       resolveEl.textContent = fmtMs(performance.now() - t0);
@@ -51,8 +36,7 @@ export function createTimers(resolveEl: HTMLElement, playEl: HTMLElement, panel:
 
   function beginPlayback() {
     stop();
-    playEl.textContent = '0ms';
-    playEl.className = 'timing__val is-live';
+    paint(playEl, 0, true);
     const t0 = performance.now();
     const tick = () => {
       playEl.textContent = fmtMs(performance.now() - t0);
@@ -62,25 +46,22 @@ export function createTimers(resolveEl: HTMLElement, playEl: HTMLElement, panel:
     return () => {
       stop();
       const ms = performance.now() - t0;
-      playEl.textContent = fmtMs(ms);
-      playEl.className = 'timing__val is-done';
+      paint(playEl, ms);
       return ms;
     };
   }
 
   function showServer(resolveMs: number | null, playMs: number | null) {
     stop();
-    showResolve(resolveMs);
-    showPlay(playMs);
+    paint(resolveEl, resolveMs);
+    paint(playEl, playMs);
   }
 
-  return {
-    beginResolve,
-    beginPlayback,
-    showServer,
-    hide: () => {
-      stop();
-      panel.hidden = true;
-    },
-  };
+  function reset() {
+    stop();
+    paint(resolveEl, null);
+    paint(playEl, null);
+  }
+
+  return { beginResolve, beginPlayback, showServer, reset };
 }
