@@ -9,6 +9,7 @@ export type ServerProfile = {
   abrMaster: boolean;
   directSegments?: boolean;
   segmentType?: string;
+  segmentPathIncludes?: readonly string[];
   headers: Record<string, string>;
 };
 
