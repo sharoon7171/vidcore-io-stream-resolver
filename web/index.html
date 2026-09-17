@@ -50,16 +50,6 @@
         <p class="resolve__hint" id="hint-tv" hidden>TV — TMDB ID plus season and episode, e.g. <code>44217</code> · S1 · E1</p>
       </form>
       <p id="err" class="msg msg--err" hidden></p>
-      <ul id="timing" class="timing" hidden>
-        <li>
-          <span class="timing__label">Resolve</span>
-          <span id="t-resolve" class="timing__val">—</span>
-        </li>
-        <li>
-          <span class="timing__label">First Frame</span>
-          <span id="t-play" class="timing__val">—</span>
-        </li>
-      </ul>
     </section>
 
     <section id="out" class="stack">
@@ -68,28 +58,40 @@
         <div id="servers" class="servers"></div>
       </div>
 
-      <div class="card">
+      <div id="player-card" class="card card--player" hidden>
         <h2 id="title" class="stream-title">Stream</h2>
-        <div class="player-toolbar">
-          <label class="quality">
-            <span class="quality__label">Quality</span>
-            <select id="quality" disabled>
-              <option value="-1">Auto</option>
-            </select>
-          </label>
-        </div>
-        <div class="player">
-          <div id="player"><video id="video" controls playsinline></video></div>
+        <div class="player-shell">
+          <div class="player-bar">
+            <div class="player-times">
+              <div class="time">
+                <span class="time__label">Resolve</span>
+                <span id="t-resolve" class="time__val">—</span>
+              </div>
+              <div class="time">
+                <span class="time__label">Playback</span>
+                <span id="t-play" class="time__val">—</span>
+              </div>
+            </div>
+            <label class="quality">
+              <span class="quality__label">Quality</span>
+              <select id="quality" disabled>
+                <option value="-1">Auto</option>
+              </select>
+            </label>
+          </div>
+          <div class="player">
+            <div id="player"><video id="video" controls playsinline></video></div>
+          </div>
         </div>
       </div>
 
-      <div class="card">
+      <div id="export-card" class="card" hidden>
         <h3 class="section-title">Export</h3>
         <ul class="exports">
-          <li>
+          <li id="export-direct" hidden>
             <div class="export__meta">
               <span class="export__name">Direct URL</span>
-              <span class="export__hint">Upstream M3U8 — use in VLC / MPV</span>
+              <span class="export__hint">Resolved upstream M3U8</span>
             </div>
             <div class="export__row">
               <input id="direct" readonly>
@@ -99,27 +101,27 @@
           <li id="export-browser" hidden>
             <div class="export__meta">
               <span class="export__name">Proxy URL</span>
-              <span class="export__hint">Shown only when playback uses the proxy</span>
+              <span class="export__hint">Local HLS relay for in-browser play</span>
             </div>
             <div class="export__row">
               <input id="browser" readonly>
               <button type="button" data-copy="browser">Copy</button>
             </div>
           </li>
-          <li>
+          <li id="export-vlc" hidden>
             <div class="export__meta">
               <span class="export__name">VLC</span>
-              <span class="export__hint">Playable command — proxy URL when CDN blocks players</span>
+              <span class="export__hint">Direct upstream + Referer when required</span>
             </div>
             <div class="export__row">
               <input id="vlc" readonly>
               <button type="button" data-copy="vlc">Copy</button>
             </div>
           </li>
-          <li>
+          <li id="export-mpv" hidden>
             <div class="export__meta">
               <span class="export__name">MPV</span>
-              <span class="export__hint">Playable command — proxy URL when CDN blocks players</span>
+              <span class="export__hint">Direct upstream + Referer / HLS flags when required</span>
             </div>
             <div class="export__row">
               <input id="mpv" readonly>

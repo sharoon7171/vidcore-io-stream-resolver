@@ -20,17 +20,22 @@ const form: ResolveForm = {
 
 const heading = el('title');
 const err = el('err');
+const playerCard = el('player-card');
 const exportFields: ExportFields = {
+  card: el('export-card'),
   direct: el('direct') as HTMLInputElement,
+  directRow: el('export-direct'),
   browser: el('browser') as HTMLInputElement,
   browserRow: el('export-browser'),
   vlc: el('vlc') as HTMLInputElement,
+  vlcRow: el('export-vlc'),
   mpv: el('mpv') as HTMLInputElement,
+  mpvRow: el('export-mpv'),
 };
 
 const serversEl = el('servers');
 const player = createHlsPlayer(el('video') as HTMLVideoElement, el('quality') as HTMLSelectElement);
-const timers = createTimers(el('t-resolve'), el('t-play'), el('timing'));
+const timers = createTimers(el('t-resolve'), el('t-play'));
 
 let lastLabel = '';
 let lastServers = idleServers();
@@ -38,9 +43,14 @@ let lastActive = '';
 let lastQuery = '';
 let selectGen = 0;
 let endResolveLive: (() => void) | null = null;
+let resolveAbort: AbortController | null = null;
 
 function errText(error: unknown) {
   return error instanceof Error ? error.message : String(error);
+}
+
+function isAbort(error: unknown) {
+  return error instanceof DOMException && error.name === 'AbortError';
 }
 
 function clearErr() {
@@ -97,40 +107,86 @@ function validateForm(): string | null {
   return null;
 }
 
+function showPlayer() {
+  playerCard.hidden = false;
+}
+
+function hidePlayer() {
+  playerCard.hidden = true;
+}
+
 function resetPlayback() {
   player.stop();
   clearExports(exportFields);
+  hidePlayer();
   endResolveLive?.();
   endResolveLive = null;
+}
+
+function clearLoadingServers(except?: string) {
+  for (const entry of lastServers) {
+    if (entry.name === except) continue;
+    if (entry.status !== 'loading') continue;
+    entry.status = 'idle';
+    entry.resolveMs = null;
+    entry.playMs = null;
+    entry.url = null;
+    entry.play = null;
+    entry.external = null;
+    entry.proxy = false;
+    entry.referer = false;
+    entry.directPlayable = false;
+  }
+}
+
+function beginResolveRequest() {
+  resolveAbort?.abort();
+  resolveAbort = new AbortController();
+  return resolveAbort.signal;
 }
 
 function invalidateIfQueryChanged() {
   const query = formQuery();
   if (query === lastQuery) return;
   lastQuery = query;
+  resolveAbort?.abort();
+  resolveAbort = null;
   lastServers = idleServers();
   lastActive = '';
   lastLabel = '';
   heading.textContent = 'Stream';
   resetPlayback();
   clearErr();
-  timers.hide();
+  timers.reset();
   paint();
 }
 
 function selectServer(entry: ServerEntry): number {
   selectGen += 1;
+  resolveAbort?.abort();
+  resolveAbort = null;
+  clearLoadingServers(entry.name);
   resetPlayback();
   clearErr();
   lastActive = entry.name;
   heading.textContent = lastLabel ? `${lastLabel} · ${entry.name}` : entry.name;
-  paint();
+  showPlayer();
   if (entry.status === 'ok') {
     timers.showServer(entry.resolveMs, entry.playMs);
     showExports(entry);
   } else {
+    entry.status = 'loading';
+    entry.resolveMs = null;
+    entry.playMs = null;
+    entry.url = null;
+    entry.play = null;
+    entry.external = null;
+    entry.proxy = false;
+    entry.referer = false;
+    entry.directPlayable = false;
     endResolveLive = timers.beginResolve();
   }
+  paint();
   return selectGen;
 }
 
@@ -144,10 +200,8 @@ function showExports(entry: ServerEntry) {
     {
       url: entry.url,
       play: entry.play,
-      external: entry.external,
       proxy: entry.proxy,
       referer: entry.referer,
-      directPlayable: entry.directPlayable,
     },
     lastLabel,
   );
@@ -164,6 +218,7 @@ function markResolveFail(entry: ServerEntry) {
   entry.playMs = null;
   player.stop();
   clearExports(exportFields);
+  hidePlayer();
   timers.showServer(entry.resolveMs, null);
   paint();
 }
@@ -233,6 +288,7 @@ function applyServerEvent(
     entry.directPlayable = false;
     entry.playMs = null;
     clearExports(exportFields);
+    hidePlayer();
     timers.showServer(entry.resolveMs, null);
     paint();
     return entry;
@@ -246,14 +302,14 @@ function applyServerEvent(
   return entry;
 }
 
-async function openNamed(name: string, gen: number): Promise<ServerEntry> {
+async function openNamed(name: string, gen: number, signal: AbortSignal): Promise<ServerEntry> {
   let resolved: ServerEntry | null = null;
   let resolveError: string | null = null;
 
   await consumeResolve(
     `/api/resolve?${queryParams(form)}&server=${encodeURIComponent(name)}`,
     async (evt) => {
-      if (!live(gen)) return;
+      if (!live(gen) || signal.aborted) return;
       if (evt.event === 'error') {
         resolveError = evt.error || 'resolve failed';
         throw new Error(resolveError);
@@ -269,9 +325,10 @@ async function openNamed(name: string, gen: number): Promise<ServerEntry> {
       }
       if (next.status === 'ok') resolved = next;
     },
+    signal,
   );
 
-  if (!live(gen)) throw new Error('cancelled');
+  if (!live(gen) || signal.aborted) throw new DOMException('cancelled', 'AbortError');
   if (!resolved) throw new Error(resolveError || `${name} failed to resolve`);
   return resolved;
 }
@@ -287,7 +344,7 @@ for (const input of [form.id, form.season, form.episode]) {
 }
 syncType(form);
 lastQuery = formQuery();
-timers.hide();
+timers.reset();
 paint();
 
 formEl.addEventListener('submit', (event) => {
@@ -325,11 +382,12 @@ serversEl.addEventListener('click', (event) => {
       return;
     }
 
+    const signal = beginResolveRequest();
     let resolved: ServerEntry;
     try {
-      resolved = await openNamed(name, gen);
+      resolved = await openNamed(name, gen, signal);
     } catch (error) {
-      if (!live(gen)) return;
+      if (!live(gen) || isAbort(error)) return;
       endResolveLive?.();
       endResolveLive = null;
       const current = findServer(name);
