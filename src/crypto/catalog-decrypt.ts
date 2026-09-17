@@ -1,17 +1,20 @@
 import { createDecipheriv, createHash } from 'node:crypto';
+import type { AzDecryptMaterial } from './az-material.js';
 
-const FIXED_BLOB = Buffer.from(
-  'ddb8548c909e1c00e2e3631e0b13b80fa905f0a84b225cd7bc290ba10a0d9d62d97e2464000000000b85290701000000',
-  'hex',
-);
-const FIXED_HASH = createHash('sha256').update(FIXED_BLOB).digest();
 const HEADER_LEN = 8;
 const KM_LEN = 16;
 const IV_LEN = 12;
 const TAG_LEN = 16;
 
-function deriveKey(km: Buffer) {
-  return createHash('sha256').update(FIXED_HASH).update(km).digest();
+let material: AzDecryptMaterial | null = null;
+
+export function setCatalogDecryptMaterial(next: AzDecryptMaterial) {
+  material = next;
+}
+
+function fixedHash() {
+  if (!material) throw new Error('catalog decrypt material not loaded');
+  return material.fixedHash;
 }
 
 export function decryptCatalogBody(body: string): unknown {
@@ -24,8 +27,9 @@ export function decryptCatalogBody(body: string): unknown {
   const iv = raw.subarray(KM_LEN, KM_LEN + IV_LEN);
   const tag = raw.subarray(raw.length - TAG_LEN);
   const ct = raw.subarray(KM_LEN + IV_LEN, raw.length - TAG_LEN);
+  const key = createHash('sha256').update(fixedHash()).update(km).digest();
 
-  const decipher = createDecipheriv('aes-256-gcm', deriveKey(km), iv, { authTagLength: TAG_LEN });
+  const decipher = createDecipheriv('aes-256-gcm', key, iv, { authTagLength: TAG_LEN });
   decipher.setAuthTag(tag);
   const plain = Buffer.concat([decipher.update(ct), decipher.final()]);
   if (plain.length <= HEADER_LEN) throw new Error('catalog plaintext empty');

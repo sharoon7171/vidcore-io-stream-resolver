@@ -39,7 +39,7 @@ async function loadCatalog(request: ResolveRequest): Promise<CatalogReady> {
     episode: request.kind === 'tv' ? request.episode : undefined,
   });
   const scraperFetch = createScraperFetch(embed.referer, embed.jar);
-  const servers = ordered(await listCatalogServers(embed.en, scraperFetch));
+  const servers = ordered(await listCatalogServers(embed.en, scraperFetch, embed.html));
   if (!servers.length) throw Object.assign(new Error('server list empty'), { stage: 'resolve' });
 
   catalogCache = { key, embed, servers, scraperFetch, at: Date.now() };
@@ -51,9 +51,10 @@ async function unlockServerEvent(
   scraperFetch: ReturnType<typeof createScraperFetch>,
   origin: string,
   started: number,
+  html: string,
 ) {
   try {
-    const config = await unlockCatalogStream(server, scraperFetch);
+    const config = await unlockCatalogStream(server, scraperFetch, html);
     const profile = profileByName(server.name);
     let url = config.url;
     if (profile?.abrMaster) {
@@ -115,7 +116,7 @@ export async function* resolvePlayback(request: ResolveRequest, origin: string, 
     return;
   }
 
-  const evt = await unlockServerEvent(target, catalog.scraperFetch, origin, started);
+  const evt = await unlockServerEvent(target, catalog.scraperFetch, origin, started, catalog.embed.html);
   yield evt;
   if (evt.server.status === 'ok') return;
 

@@ -16,6 +16,7 @@ export type EmbedSnapshot = {
   meta: { title?: string; year?: string | number };
   referer: string;
   jar: Map<string, string>;
+  html: string;
 };
 
 function parseNextPropsObject(raw: string): EmbedProps {
@@ -50,11 +51,13 @@ export async function scrapeEmbedPage(
   });
   if (!response.ok) throw new Error(`page fetch failed: ${response.status} ${response.statusText}`);
   collectCookies(response, jar);
-  const props = extractEmbedProps(await response.text());
+  const html = await response.text();
+  const props = extractEmbedProps(html);
   return {
     en: props.en,
     meta: { title: props.title, year: props.year },
     referer: `${siteOrigin}${path}`,
     jar,
+    html,
   };
 }
