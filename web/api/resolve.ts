@@ -27,7 +27,10 @@ type OkServer = Extract<ResolveEvent, { event: 'server' }>['server'] & {
 export async function consumeResolve(
   url: string,
   onEvent: (evt: ResolveEvent) => void | Promise<void>,
+  signal?: AbortSignal,
 ): Promise<void> {
+  if (signal?.aborted) throw new DOMException('cancelled', 'AbortError');
+
   let chain = Promise.resolve();
   const enqueue = (evt: ResolveEvent) => {
     chain = chain.then(() => onEvent(evt));
@@ -46,6 +49,19 @@ export async function consumeResolve(
       reject(error);
     };
 
+    const onAbort = () => {
+      xhr.abort();
+      fail(new DOMException('cancelled', 'AbortError'));
+    };
+
+    if (signal) {
+      if (signal.aborted) {
+        onAbort();
+        return;
+      }
+      signal.addEventListener('abort', onAbort, { once: true });
+    }
+
     const flush = () => {
       const chunk = xhr.responseText.slice(offset);
       if (chunk.length === 0) return;
@@ -60,6 +76,7 @@ export async function consumeResolve(
     };
 
     const finish = () => {
+      signal?.removeEventListener('abort', onAbort);
       if (failed) return;
       if (xhr.status >= 400) {
         fail(new Error(`resolve failed: ${xhr.status}`));
@@ -73,6 +90,7 @@ export async function consumeResolve(
     xhr.onprogress = flush;
     xhr.onload = finish;
     xhr.onerror = () => fail(new Error('resolve failed'));
+    xhr.onabort = () => fail(new DOMException('cancelled', 'AbortError'));
     xhr.send();
   });
 
