@@ -165,7 +165,20 @@ function readPrefix(stream: IncomingMessage, size: number) {
   });
 }
 
-function segmentContentType(profile: ServerProfile, upstream: string | undefined, target: string) {
+function hostAllowed(profile: ServerProfile, target: string) {
+  const host = new URL(target).hostname;
+  if (profile.hosts.some((item) => host === item || host.endsWith(`.${item}`))) return true;
+  const path = new URL(target).pathname;
+  return Boolean(profile.segmentPathIncludes?.some((part) => path.includes(part)));
+}
+
+function segmentContentType(
+  profile: ServerProfile,
+  upstream: string | undefined,
+  target: string,
+  prefix?: Buffer,
+) {
+  if (prefix?.length && prefix[0] === 0x47) return 'video/mp2t';
   if (profile.segmentType) return profile.segmentType;
   if (upstream) return upstream;
   const path = new URL(target).pathname.toLowerCase();
@@ -191,10 +204,11 @@ function writeSegmentHeaders(
   profile: ServerProfile,
   up: IncomingMessage,
   target: string,
+  prefix?: Buffer,
 ) {
   const out: Record<string, string> = {
     ...cors,
-    'content-type': segmentContentType(profile, up.headers['content-type'], target),
+    'content-type': segmentContentType(profile, up.headers['content-type'], target, prefix),
     'cache-control': String(up.headers['cache-control'] || 'public, max-age=60'),
   };
   for (const name of ['content-length', 'content-range', 'accept-ranges'] as const) {
@@ -211,9 +225,8 @@ async function serveProxyHls(
   origin: string,
   profile: ServerProfile,
 ) {
-  const host = new URL(target).hostname;
-  if (!profile.hosts.some((item) => host === item || host.endsWith(`.${item}`))) {
-    throw new Error(`host ${host} not allowed for ${profile.name}`);
+  if (!hostAllowed(profile, target)) {
+    throw new Error(`host ${new URL(target).hostname} not allowed for ${profile.name}`);
   }
 
   const pathLooksPlaylist = new URL(target).pathname.toLowerCase().endsWith('.m3u8');
@@ -254,7 +267,7 @@ async function serveProxyHls(
     throw new Error(`upstream ${up.statusCode}`);
   }
 
-  writeSegmentHeaders(res, up.statusCode, profile, up, target);
+  writeSegmentHeaders(res, up.statusCode, profile, up, target, prefix);
   res.write(prefix);
   up.resume();
   try {
@@ -307,9 +320,8 @@ export function playbackForServer(origin: string, url: string, name: string) {
 }
 
 async function serveDirectPlaylist(res: ServerResponse, target: string, profile: ServerProfile) {
-  const host = new URL(target).hostname;
-  if (!profile.hosts.some((item) => host === item || host.endsWith(`.${item}`))) {
-    throw new Error(`host ${host} not allowed for ${profile.name}`);
+  if (!hostAllowed(profile, target)) {
+    throw new Error(`host ${new URL(target).hostname} not allowed for ${profile.name}`);
   }
 
   const up = await onceUpstream(target, {
