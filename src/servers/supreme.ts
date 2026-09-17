@@ -1,4 +1,4 @@
-import { type ServerProfile, vidcoreHeaders } from './types.js';
+import { type ServerProfile } from './types.js';
 
 export const supreme: ServerProfile = {
   name: 'Supreme',
@@ -7,5 +7,5 @@ export const supreme: ServerProfile = {
   directPlayable: true,
   refererRequired: false,
   abrMaster: true,
-  headers: { ...vidcoreHeaders },
+  headers: {},
 };
