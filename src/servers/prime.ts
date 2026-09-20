@@ -2,7 +2,14 @@ import { type ServerProfile, vidcoreHeaders } from './types.js';
 
 export const prime: ServerProfile = {
   name: 'Prime',
-  hosts: ['moon.peakstorm.top', 'keenanchor.top', 'northoak.top', 'lunarcabin.top', 'thunderpencil.site'],
+  hosts: [
+    'moon.clearvault.top',
+    'moon.peakstorm.top',
+    'keenanchor.top',
+    'northoak.top',
+    'lunarcabin.top',
+    'thunderpencil.site',
+  ],
   needsProxy: true,
   directPlayable: true,
   refererRequired: true,
