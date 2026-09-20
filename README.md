@@ -132,7 +132,7 @@ Each mirror has a profile in `src/servers/` (allowed CDN hosts, proxy required o
 
 Direct M3U8 links often work in VLC or MPV when no browser `Origin` is sent (and a referer can be set when required). In-page playback cannot rely on that alone:
 
-- Orbit on `moon.peakstorm.top` returns **403** without a vidcore **Referer**; with Referer, playlists and disguised TS segments (`.html` / `.css` / `.js`) return **200**. No `EXT-X-KEY` — clear MPEG-TS (`0x47`) under fake MIME types. `Range: bytes=0-` on the playlist returns **500**; VLC needs `--http-continuous`, MPV needs `seekable=0` + `extension_picky=0`. Export commands use the **direct** upstream URL; the browser still uses the local HLS proxy for `video/mp2t`
+- Orbit on `moon.clearvault.top` (and older `moon.peakstorm.top`) returns **403** without a vidcore **Referer**; with Referer, playlists and disguised TS segments (`.html` / `.css` / `.js`) return **200**. No `EXT-X-KEY` — clear MPEG-TS (`0x47`) under fake MIME types. `Range: bytes=0-` on the playlist returns **500**; VLC needs `--http-continuous`, MPV needs `seekable=0` + `extension_picky=0`. Export commands use the **direct** upstream URL; the browser still uses the local HLS proxy for `video/mp2t`
 - Page scripts cannot freely set the **Referer** some mirrors expect
 - Orbit playlists are large (~1.6k absolute signed paths); embedding those as base64url proxy paths breaks external players — the relay mints short opaque ids instead
 - CDN may compress Orbit TS as brotli/gzip because of the fake `text/html` type — the proxy forces `Accept-Encoding: identity` and rewrites the media type to `video/mp2t`
