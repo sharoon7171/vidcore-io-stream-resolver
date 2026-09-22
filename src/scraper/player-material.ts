@@ -196,8 +196,8 @@ async function fetchPlayerChunk(html: string) {
   }
 }
 
-export async function loadPlayerMaterial(opts: { force?: boolean; html: string }): Promise<PlayerMaterial> {
-  if (!opts.force && cached && Date.now() - cachedAt < TTL_MS) return cached;
+export async function loadPlayerMaterial(opts: { html: string }): Promise<PlayerMaterial> {
+  if (cached && Date.now() - cachedAt < TTL_MS) return cached;
   if (!opts.html) throw new Error('embed html required for player material');
 
   const { url: chunkUrl, text: chunk } = await fetchPlayerChunk(opts.html);
@@ -216,9 +216,4 @@ export async function loadPlayerMaterial(opts: { force?: boolean; html: string }
   cached = { routes, decrypt, seal, chunkUrl };
   cachedAt = Date.now();
   return cached;
-}
-
-export function clearPlayerMaterialCache() {
-  cached = null;
-  cachedAt = 0;
 }
