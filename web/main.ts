@@ -132,10 +132,11 @@ function clearLoadingServers(except?: string) {
     entry.playMs = null;
     entry.url = null;
     entry.play = null;
-    entry.external = null;
     entry.proxy = false;
     entry.referer = false;
-    entry.directPlayable = false;
+    entry.refererUrl = null;
+    entry.userAgent = null;
+    entry.cli = null;
   }
 }
 
@@ -180,10 +181,11 @@ function selectServer(entry: ServerEntry): number {
     entry.playMs = null;
     entry.url = null;
     entry.play = null;
-    entry.external = null;
     entry.proxy = false;
     entry.referer = false;
-    entry.directPlayable = false;
+    entry.refererUrl = null;
+    entry.userAgent = null;
+    entry.cli = null;
     endResolveLive = timers.beginResolve();
   }
   paint();
@@ -202,6 +204,9 @@ function showExports(entry: ServerEntry) {
       play: entry.play,
       proxy: entry.proxy,
       referer: entry.referer,
+      refererUrl: entry.refererUrl,
+      userAgent: entry.userAgent,
+      cli: entry.cli,
     },
     lastLabel,
   );
@@ -211,10 +216,11 @@ function markResolveFail(entry: ServerEntry) {
   entry.status = 'fail';
   entry.url = null;
   entry.play = null;
-  entry.external = null;
   entry.proxy = false;
   entry.referer = false;
-  entry.directPlayable = false;
+  entry.refererUrl = null;
+  entry.userAgent = null;
+  entry.cli = null;
   entry.playMs = null;
   player.stop();
   clearExports(exportFields);
@@ -263,10 +269,11 @@ function applyServerEvent(
     entry.playMs = null;
     entry.url = null;
     entry.play = null;
-    entry.external = null;
     entry.proxy = false;
     entry.referer = false;
-    entry.directPlayable = false;
+    entry.refererUrl = null;
+    entry.userAgent = null;
+    entry.cli = null;
     if (!endResolveLive) endResolveLive = timers.beginResolve();
     lastActive = entry.name;
     heading.textContent = lastLabel ? `${lastLabel} · ${entry.name}` : entry.name;
@@ -282,10 +289,11 @@ function applyServerEvent(
     entry.resolveMs = evt.server.ms;
     entry.url = null;
     entry.play = null;
-    entry.external = null;
     entry.proxy = false;
     entry.referer = false;
-    entry.directPlayable = false;
+    entry.refererUrl = null;
+    entry.userAgent = null;
+    entry.cli = null;
     entry.playMs = null;
     clearExports(exportFields);
     hidePlayer();

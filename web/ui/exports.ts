@@ -1,7 +1,3 @@
-const REF = 'https://vidcore.io/';
-const UA =
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36';
-
 export type ExportFields = {
   card: HTMLElement;
   direct: HTMLInputElement;
@@ -14,16 +10,63 @@ export type ExportFields = {
   mpvRow: HTMLElement;
 };
 
+type ExportCli = {
+  vlcArgs: string[];
+  mpvArgs: string[];
+  mediaTitle: boolean;
+};
+
 type ExportServer = {
   url: string;
   play: string | null;
   proxy: boolean;
   referer: boolean;
+  refererUrl: string | null;
+  userAgent: string | null;
+  cli: ExportCli | null;
 };
 
 function setRow(row: HTMLElement, input: HTMLInputElement, value: string) {
   input.value = value;
   row.hidden = !value;
+}
+
+function shellQuote(value: string) {
+  return `'${value.replace(/'/g, `'\"'\"'`)}'`;
+}
+
+function buildVlc(entry: ExportServer, stream: string) {
+  if (entry.cli) {
+    const parts = ['vlc'];
+    if (entry.referer && entry.refererUrl) parts.push(`--http-referrer=${shellQuote(entry.refererUrl)}`);
+    if (entry.userAgent) parts.push(`--http-user-agent=${shellQuote(entry.userAgent)}`);
+    for (const arg of entry.cli.vlcArgs) parts.push(arg);
+    parts.push(`"${stream}"`);
+    return parts.join(' ');
+  }
+  const ref = entry.refererUrl;
+  const ua = entry.userAgent;
+  return entry.referer && ref && ua
+    ? `vlc --adaptive-logic=highest --http-continuous --http-referrer='${ref}' --http-user-agent='${ua}' "${stream}"`
+    : `vlc --adaptive-logic=highest "${stream}"`;
+}
+
+function buildMpv(entry: ExportServer, stream: string, label: string) {
+  const title = `--force-media-title="${String(label).replace(/"/g, '\\"')}"`;
+  if (entry.cli) {
+    const parts = ['mpv'];
+    if (entry.referer && entry.refererUrl) parts.push(`--referrer=${shellQuote(entry.refererUrl)}`);
+    if (entry.userAgent) parts.push(`--user-agent=${shellQuote(entry.userAgent)}`);
+    for (const arg of entry.cli.mpvArgs) parts.push(arg);
+    if (entry.cli.mediaTitle) parts.push(title);
+    parts.push(`"${stream}"`);
+    return parts.join(' ');
+  }
+  const ref = entry.refererUrl;
+  const ua = entry.userAgent;
+  return entry.referer && ref && ua
+    ? `mpv --referrer='${ref}' --user-agent='${ua}' --ytdl=no --hls-bitrate=max --demuxer-lavf-o=seekable=0,extension_picky=0 --stream-lavf-o=seekable=0 ${title} "${stream}"`
+    : `mpv --ytdl=no --hls-bitrate=max ${title} "${stream}"`;
 }
 
 export function clearExports(fields: ExportFields) {
@@ -40,20 +83,13 @@ export function bindExports(fields: ExportFields, entry: ExportServer, label: st
     return;
   }
 
-  const title = `--force-media-title="${String(label).replace(/"/g, '\\"')}"`;
   const stream = entry.url;
   const proxy = entry.proxy && entry.play ? entry.play : '';
-  const vlc = entry.referer
-    ? `vlc --adaptive-logic=highest --http-continuous --http-referrer='${REF}' --http-user-agent='${UA}' "${stream}"`
-    : `vlc --adaptive-logic=highest "${stream}"`;
-  const mpv = entry.referer
-    ? `mpv --referrer='${REF}' --user-agent='${UA}' --ytdl=no --hls-bitrate=max --demuxer-lavf-o=seekable=0,extension_picky=0 --stream-lavf-o=seekable=0 ${title} "${stream}"`
-    : `mpv --ytdl=no --hls-bitrate=max ${title} "${stream}"`;
 
   setRow(fields.directRow, fields.direct, stream);
   setRow(fields.browserRow, fields.browser, proxy);
-  setRow(fields.vlcRow, fields.vlc, vlc);
-  setRow(fields.mpvRow, fields.mpv, mpv);
+  setRow(fields.vlcRow, fields.vlc, buildVlc(entry, stream));
+  setRow(fields.mpvRow, fields.mpv, buildMpv(entry, stream, label));
   fields.card.hidden = false;
 }
 

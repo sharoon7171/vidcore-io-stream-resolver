@@ -12,10 +12,15 @@ export type ResolveEvent =
         ms: number;
         url: string;
         play: string | null;
-        external: string | null;
         proxy: boolean;
         referer: boolean;
-        directPlayable: boolean;
+        refererUrl: string | null;
+        userAgent: string | null;
+        cli: {
+          vlcArgs: string[];
+          mpvArgs: string[];
+          mediaTitle: boolean;
+        } | null;
       };
     }
   | { event: 'error'; stage?: string; error?: string };
@@ -102,8 +107,9 @@ export function applyOkFields(entry: ServerEntry, server: OkServer) {
   entry.resolveMs = server.ms;
   entry.url = server.url;
   entry.play = server.play;
-  entry.external = server.external;
   entry.proxy = server.proxy;
   entry.referer = server.referer;
-  entry.directPlayable = server.directPlayable;
+  entry.refererUrl = server.refererUrl;
+  entry.userAgent = server.userAgent;
+  entry.cli = server.cli;
 }

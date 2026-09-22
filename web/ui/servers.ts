@@ -7,10 +7,15 @@ export type ServerEntry = {
   playMs: number | null;
   url: string | null;
   play: string | null;
-  external: string | null;
   proxy: boolean;
   referer: boolean;
-  directPlayable: boolean;
+  refererUrl: string | null;
+  userAgent: string | null;
+  cli: {
+    vlcArgs: string[];
+    mpvArgs: string[];
+    mediaTitle: boolean;
+  } | null;
 };
 
 export function idleServers(): ServerEntry[] {
@@ -21,10 +26,11 @@ export function idleServers(): ServerEntry[] {
     playMs: null,
     url: null,
     play: null,
-    external: null,
     proxy: false,
     referer: false,
-    directPlayable: false,
+    refererUrl: null,
+    userAgent: null,
+    cli: null,
   }));
 }
 
