@@ -25,7 +25,8 @@ Pass a TMDB id for a movie, or a TMDB id with season and episode for a series. T
 Each successful unlock returns:
 
 - `url` — direct upstream playlist for external players that can set a referer
-- `play` — short `/api/hls/{server}/{id}` relay URL when the mirror needs the local proxy (browser hls.js, Orbit, and other proxied mirrors)
+- `play` — short `/api/hls/{server}/{id}` relay URL when the mirror needs the local proxy (browser hls.js)
+- `referer` / `refererUrl` / `userAgent` / `cli` — export metadata for VLC and MPV
 
 Results stream as **NDJSON** so the UI can show loading state, metadata, timing, and success or failure as the selected mirror unlocks.
 
@@ -36,11 +37,11 @@ Results stream as **NDJSON** so the UI can show loading state, metadata, timing,
 - **Live player material** — discovers the player chunk from the embed HTML, recovers XOR seeds, seal keys, maps, routes, and decrypt material from bytecode (no hardcoded key blobs)
 - **Native seal** — AES-256-CBC pack, iZ remap, and post mix/RC4 in `src/crypto/seal.ts` (sub-millisecond once material is loaded)
 - **Native catalog decrypt** — AES-256-GCM wire layout + KDF for list and unlock bodies
-- **Ranked mirrors** — Orbit, Supreme, Prime, Premiere 4K, and Horizon with per-server CDN profiles
+- **Ranked mirrors** — Orbit, Supreme, Prime, Premiere 4K, and Horizon with per-server proxy / referer / CLI profiles
 - **ABR ladder** — Prime / Supreme media playlists promoted to sibling `master.m3u8` when present; proxied masters sorted lowest bandwidth first
-- **Short-id HLS proxy** — opaque in-process id map, playlist rewrite, segment relay, Range support, Referer, and `Accept-Encoding: identity`
-- **Browser player** — hls.js UI with quality / Auto ABR, resolve timing, and mirror switching
-- **VLC / MPV export** — copy-ready commands on the direct upstream URL (highest ABR by default; flags below to change quality)
+- **Short-id HLS proxy** — opaque in-process id map, playlist rewrite, segment relay, Range support, site Referer, `Accept-Encoding: identity`, upstream retries, and an LRU segment cache
+- **Browser player** — hls.js UI with quality / Auto ABR, seek-friendly buffer defaults, resolve timing, and mirror switching
+- **VLC / MPV export** — per-server minimal copy-ready commands on the direct upstream URL
 - **NDJSON resolve API** — progressive `meta`, `server`, and `error` events over HTTP
 - **TypeScript ESM** — `tsx` for the server, compiled web assets in `dist/`
 
@@ -126,22 +127,20 @@ UI and catalog ranking order (`src/servers/index.ts`):
 4. Premiere 4K
 5. Horizon
 
-Each mirror has a profile in `src/servers/` (allowed CDN hosts, proxy required or not, referer rules, optional segment MIME, ABR master handling). Profiles drive how the resolver builds `play` URLs and how the HLS relay fetches upstream.
+Each mirror has a profile in `src/servers/` (`needsProxy`, `refererRequired`, `abrMaster`, optional `segmentType`, optional `cli`). Profiles drive how the resolver builds `play` / export fields and how the HLS relay fetches upstream. Upstream hosts are trusted from the unlock URL mint (no static CDN host allowlist).
 
 ### Why a Proxy Is Needed
 
 Direct M3U8 links often work in VLC or MPV when no browser `Origin` is sent (and a referer can be set when required). In-page playback cannot rely on that alone:
 
-- Orbit on `moon.clearvault.top` (and older `moon.peakstorm.top`) returns **403** without a vidcore **Referer**; with Referer, playlists and disguised TS segments (`.html` / `.css` / `.js`) return **200**. No `EXT-X-KEY` — clear MPEG-TS (`0x47`) under fake MIME types. `Range: bytes=0-` on the playlist returns **500**; VLC needs `--http-continuous`, MPV needs `seekable=0` + `extension_picky=0`. Export commands use the **direct** upstream URL; the browser still uses the local HLS proxy for `video/mp2t`
+- Orbit returns **403** without a vidcore **Referer**; with Referer, playlists and disguised TS segments (`.html` / `.css` / `.js`) return **200**. No `EXT-X-KEY` — clear MPEG-TS (`0x47`) under fake MIME types. Export commands use the **direct** upstream URL with Referer (MPV also needs `--stream-lavf-o=seekable=0`); the browser uses the local HLS proxy and forces `video/mp2t`
 - Page scripts cannot freely set the **Referer** some mirrors expect
 - Orbit playlists are large (~1.6k absolute signed paths); embedding those as base64url proxy paths breaks external players — the relay mints short opaque ids instead
 - CDN may compress Orbit TS as brotli/gzip because of the fake `text/html` type — the proxy forces `Accept-Encoding: identity` and rewrites the media type to `video/mp2t`
 
-Prime unlocks often point at a single **2160p** media playlist under `/vd/{token}/`. `src/servers/ladder.ts` promotes that to the sibling ABR `master.m3u8` when present. Proxied masters are sorted **lowest bandwidth first** so hls.js can start on 480p. `/vd/` media segments live on `keenanchor.top` (fMP4 init + `.m4s`).
+Prime unlocks often point at a single **2160p** media playlist under `/vd/{token}/`. `src/servers/ladder.ts` promotes that to the sibling ABR `master.m3u8` when present (ladder fetches always send the site Referer). Proxied masters are sorted **lowest bandwidth first** so hls.js can start on 480p. Segments are clear fMP4 (init + `.m4s`) or clear MPEG-TS under fake extensions on rotating CDNs. They return **403** without a vidcore **Referer**. Moon media playlists also reject non-vidcore browser `Origin` — proxy stays on and never forwards the browser `Origin` upstream. Export VLC/MPV use the **direct** URL with Referer only.
 
-Prime `/r2/cdn2/…/playlist.m3u8` is already ABR (1080p / 720p / 480p). Segments are **clear MPEG-TS** (`0x47`) under fake extensions (`.jpg` / `.html` / …) on rotating CDNs (`northoak.top`, `lunarcabin.top`, `thunderpencil.site`, …). They return **403** without a vidcore **Referer**; with Referer they return **200**. Moon media playlists reject non-vidcore browser `Origin` — proxy stays on, sends Referer upstream, allows `/r2/cdn2/` segment hosts, and forces `video/mp2t` when the payload sync byte is `0x47`. Export VLC/MPV use the **direct** URL with Referer (`--http-continuous` / `seekable=0` + `extension_picky=0` + `--hls-bitrate=max`).
-
-Supreme `/vd/…/master.m3u8` needs **no Referer** for curl / VLC / MPV (clear fMP4 ABR, no `EXT-X-KEY`). Browser requests that send a non-vidcore `Origin` get **403** on moon **media** playlists (and often on the master), so the in-page player still uses the HLS proxy; export VLC/MPV commands stay on the **direct** URL with no extra headers.
+Supreme `/vd/…/master.m3u8` is clear fMP4 ABR (no `EXT-X-KEY`). Browser requests that send a non-vidcore `Origin` get **403** on moon media playlists (and often on the master), so the in-page player still uses the HLS proxy. Export VLC/MPV use the **direct** URL with Referer.
 
 The resolve payload therefore includes:
 
@@ -149,9 +148,10 @@ The resolve payload therefore includes:
 | --- | --- |
 | `url` | Upstream M3U8 for export and external players (VLC / MPV) |
 | `play` | `/api/hls/{server}/{id}` short local relay URL when `proxy` is true |
-| `proxy` / `referer` / `directPlayable` | Flags for the UI and export commands |
+| `proxy` / `referer` / `refererUrl` / `userAgent` | Flags and header values for the UI and export commands |
+| `cli` | Per-server VLC/MPV arg profile (`vlcArgs`, `mpvArgs`, `mediaTitle`), or `null` |
 
-The proxy (`src/proxy/hls.ts` + `src/proxy/store.ts`) rewrites playlist lines and `URI="…"` values (including `EXT-X-MAP`) back through itself as short ids (TTL ~6 hours, deduped by upstream URL), forwards `Range` for seeking, streams segments with keep-alive, and never forwards the browser `Origin` upstream. Legacy base64url-encoded absolute targets still resolve. The same `/api/hls/{server}/{id}` shape can later use Cloudflare KV without changing clients.
+The proxy (`src/proxy/hls.ts` + `src/proxy/store.ts` + `src/proxy/segment-cache.ts`) rewrites playlist lines and `URI="…"` values (including `EXT-X-MAP`) back through itself as short ids (TTL ~6 hours, deduped by upstream URL), always sends the site Referer upstream (`src/http/upstream.ts`), forwards `Range` for seeking, retries transient upstream failures, caches full non-Range segments in an in-process LRU (~96 MB / 10 min TTL), streams with keep-alive, and never forwards the browser `Origin` upstream. Only short ids from the store resolve — there is no legacy base64url target path. The same `/api/hls/{server}/{id}` shape can later use Cloudflare KV without changing clients.
 
 ## Web Interface
 
@@ -160,19 +160,20 @@ The local UI at `/` is a single-page resolve console:
 1. Choose **Movie** or **TV** and enter the TMDB id (plus season and episode for TV)
 2. Pick a server from the ranked list
 3. Watch NDJSON progress: metadata, loading state, success or failure with timing
-4. Play through hls.js when a proxied or direct playable URL is ready (use the **Quality** dropdown for Auto ABR or a fixed ladder step)
+4. Play through hls.js when a proxied or direct URL is ready (use the **Quality** dropdown for Auto ABR or a fixed ladder step)
 5. Copy export commands for VLC and MPV from the panel
 
-### VLC / MPV Quality
+### VLC / MPV Export
 
-Every server’s copied export command picks the **highest** available ABR rung by default (Orbit, Supreme, Prime, Premiere 4K, Horizon — same flags on each):
+Copy-ready commands use the **direct** upstream `url`. Orbit, Supreme, and Prime ship a minimal `cli` profile (Referer only; Orbit MPV also adds `--stream-lavf-o=seekable=0`). Premiere 4K and Horizon have no `cli` profile and fall back to ABR-oriented defaults (`--adaptive-logic=highest` / `--hls-bitrate=max`) when no referer is required.
 
-| Player | Default (in export) | Change quality |
+| Mirror | VLC (typical) | MPV (typical) |
 | --- | --- | --- |
-| VLC | `--adaptive-logic=highest` | `--adaptive-logic=lowest` for the lowest rung, or `rate` / `nearoptimal` for adaptive |
-| MPV | `--hls-bitrate=max` | `--hls-bitrate=min` for the lowest rung, or `--hls-bitrate=<bits>` for a bandwidth cap |
+| Orbit | `--http-referrer=…` | `--referrer=… --stream-lavf-o=seekable=0` |
+| Supreme / Prime | `--http-referrer=…` | `--referrer=…` |
+| Premiere 4K / Horizon | `--adaptive-logic=highest` | `--ytdl=no --hls-bitrate=max` (+ media title) |
 
-Example: swap highest for lowest on the same URL by editing only that flag before you run the command. Single-rendition streams (for example many Orbit playlists) ignore ABR flags.
+To prefer a lower ABR rung on Premiere / Horizon (or any player that still honors ABR flags), edit the copied command before running it — for example `--adaptive-logic=lowest` or `--hls-bitrate=min`. Single-rendition streams (for example many Orbit playlists) ignore ABR flags.
 
 The interface is built from `web/` into `dist/` on start. It talks only to the local `/api/resolve` and `/api/hls` endpoints.
 
@@ -196,7 +197,7 @@ Typical events:
 | --- | --- |
 | `server` with `loading` | Unlock started for that mirror |
 | `meta` | Title and year when available |
-| `server` with `ok` | Stream ready (`url`, `play`, `proxy`, `referer`, `directPlayable`, timing) |
+| `server` with `ok` | Stream ready (`url`, `play`, `proxy`, `referer`, `refererUrl`, `userAgent`, `cli`, timing) |
 | `server` with `fail` | That unlock failed |
 | `error` | Input, scrape, or unlock failure for the request |
 
@@ -204,7 +205,7 @@ Invalid query parameters return `400` JSON. Successful streams write one event p
 
 ### `GET /api/hls/{server}/{id}`
 
-HLS proxy for manifests and media segments. `{id}` is a short opaque token from `src/proxy/store.ts` (legacy base64url absolute URLs still resolve). Playlists are rewritten so child URIs stay on this relay as short ids; binary segments are fetched with the mirror’s configured headers plus `Accept-Encoding: identity` and returned with CORS for the UI.
+HLS proxy for manifests and media segments. `{id}` is a short opaque token from `src/proxy/store.ts`. Playlists are rewritten so child URIs stay on this relay as short ids; binary segments are fetched with the site Referer plus `Accept-Encoding: identity` and returned with CORS for the UI. Range requests are forwarded for seeking; full segments may be served from the in-process LRU cache.
 
 ## Project Layout
 
@@ -216,8 +217,8 @@ src/
   resolver/          request parse, catalog list/unlock, pipeline
   crypto/            native seal + material scanners + catalog decrypt
   servers/           mirror profiles + ABR ladder
-  proxy/             HLS rewrite, short-id store, segment relay
-  http/              router and static files from dist/
+  proxy/             HLS rewrite, short-id store, segment cache, segment relay
+  http/              router, upstream headers, static files from dist/
 web/                 UI source (TypeScript, HTML, CSS)
 dist/                built UI (generated)
 ```
@@ -234,9 +235,12 @@ dist/                built UI (generated)
 | Embed scrape | `src/scraper/embed.ts` |
 | HLS relay | `src/proxy/hls.ts` |
 | Short-id map | `src/proxy/store.ts` |
+| Segment cache | `src/proxy/segment-cache.ts` |
+| Upstream headers | `src/http/upstream.ts` |
 | ABR ladder | `src/servers/ladder.ts` |
 | Mirror registry | `src/servers/` |
 | Browser player | `web/player/hls.ts`, `web/main.ts` |
+| Export builders | `web/ui/exports.ts` |
 
 ## Configuration
 
@@ -247,7 +251,7 @@ dist/                built UI (generated)
 | `VIDCORE_ORIGIN` | `https://vidcore.io` | Scraper and referer origin for vidcore.io |
 | `USER_AGENT` | Chrome desktop string | Upstream User-Agent |
 
-Override `VIDCORE_ORIGIN` only when pointing at a compatible vidcore.io host. Scraper referers and proxy headers follow that origin.
+Override `VIDCORE_ORIGIN` only when pointing at a compatible vidcore.io host. Scraper referers and proxy headers follow that origin (`siteReferer` is `{VIDCORE_ORIGIN}/`).
 
 ## Stack
 
