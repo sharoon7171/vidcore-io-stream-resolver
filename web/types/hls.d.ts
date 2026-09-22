@@ -13,14 +13,6 @@ declare module 'hls.js' {
     name?: string;
   };
 
-  export type ManifestParsedData = {
-    levels: Level[];
-  };
-
-  export type LevelSwitchedData = {
-    level: number;
-  };
-
   export default class Hls {
     static isSupported(): boolean;
     static Events: {
@@ -47,20 +39,20 @@ declare module 'hls.js' {
       maxBufferSize?: number;
       maxBufferHole?: number;
       backBufferLength?: number;
+      highBufferWatchdogPeriod?: number;
+      nudgeMaxRetry?: number;
       fragLoadingTimeOut?: number;
       manifestLoadingTimeOut?: number;
       fragLoadingMaxRetry?: number;
       levelLoadingMaxRetry?: number;
+      fragLoadingRetryDelay?: number;
+      levelLoadingRetryDelay?: number;
       progressive?: boolean;
     });
     readonly levels: Level[];
     readonly autoLevelEnabled: boolean;
-    startLevel: number;
     currentLevel: number;
-    nextLevel: number;
-    loadLevel: number;
     on(event: string, cb: (...args: any[]) => void): void;
-    off(event: string, cb: (...args: any[]) => void): void;
     attachMedia(media: HTMLMediaElement): void;
     loadSource(source: string): void;
     startLoad(startPosition?: number): void;
