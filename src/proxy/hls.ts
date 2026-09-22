@@ -3,7 +3,10 @@ import https from 'node:https';
 import { Buffer } from 'node:buffer';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { pipeline } from 'node:stream/promises';
+import { siteReferer, userAgent } from '../config.js';
+import { browserHeaders, withSiteReferer } from '../http/upstream.js';
 import { profileByName, type ServerProfile } from '../servers/index.js';
+import { cacheGet, cacheSet } from './segment-cache.js';
 import { mintProxyId, resolveProxyId } from './store.js';
 
 const cors = {
@@ -11,19 +14,20 @@ const cors = {
   'Access-Control-Expose-Headers': 'Content-Length, Content-Range, Accept-Ranges',
 };
 
-const httpsAgent = new https.Agent({ keepAlive: true, maxSockets: 256, maxFreeSockets: 64 });
-const httpAgent = new http.Agent({ keepAlive: true, maxSockets: 256, maxFreeSockets: 64 });
-const REQ_MS = 45000;
-
-function decodeLegacyTarget(encoded: string) {
-  try {
-    const url = Buffer.from(encoded, 'base64url').toString('utf8');
-    if (url.startsWith('http://') || url.startsWith('https://')) return url;
-  } catch {
-    return null;
-  }
-  return null;
-}
+const httpsAgent = new https.Agent({
+  keepAlive: true,
+  maxSockets: 256,
+  maxFreeSockets: 64,
+  scheduling: 'lifo',
+});
+const httpAgent = new http.Agent({
+  keepAlive: true,
+  maxSockets: 256,
+  maxFreeSockets: 64,
+  scheduling: 'lifo',
+});
+const REQ_MS = 30000;
+const UP_RETRY = 4;
 
 function proxyPlaylistUrl(origin: string, url: string, server: string) {
   return `${origin}/api/hls/${encodeURIComponent(server)}/${mintProxyId(url)}`;
@@ -83,21 +87,6 @@ function rewritePlaylist(text: string, base: string, origin: string, server: str
     .join('\n');
 }
 
-function absolutizePlaylist(text: string, base: string) {
-  return text
-    .split('\n')
-    .map((line) => {
-      const t = line.trim();
-      if (!t) return line;
-      if (t.startsWith('#')) {
-        if (!t.includes('URI="')) return line;
-        return t.replace(/URI="([^"]+)"/g, (_, uri: string) => `URI="${abs(uri, base)}"`);
-      }
-      return abs(t, base);
-    })
-    .join('\n');
-}
-
 function open(url: string, headers: Record<string, string>) {
   const u = new URL(url);
   const lib = u.protocol === 'https:' ? https : http;
@@ -133,6 +122,22 @@ function onceUpstream(url: string, headers: Record<string, string>): Promise<Inc
   });
 }
 
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
+
+async function onceUpstreamRetried(url: string, headers: Record<string, string>) {
+  let last: IncomingMessage | null = null;
+  for (let attempt = 0; attempt <= UP_RETRY; attempt++) {
+    const up = await onceUpstream(url, headers);
+    if (up.statusCode !== 502 && up.statusCode !== 503) return up;
+    up.resume();
+    last = up;
+    if (attempt < UP_RETRY) await sleep(50 * 2 ** attempt);
+  }
+  return last!;
+}
+
 function readBuffer(stream: IncomingMessage) {
   return new Promise<Buffer>((resolve, reject) => {
     const chunks: Buffer[] = [];
@@ -142,43 +147,29 @@ function readBuffer(stream: IncomingMessage) {
   });
 }
 
-function readPrefix(stream: IncomingMessage, size: number) {
-  return new Promise<Buffer>((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    let total = 0;
-    const onData = (c: Buffer) => {
-      chunks.push(c);
-      total += c.length;
-      if (total >= size) {
-        stream.off('data', onData);
-        stream.off('error', reject);
-        stream.pause();
-        resolve(Buffer.concat(chunks));
-      }
-    };
-    stream.on('data', onData);
-    stream.once('error', reject);
-    stream.once('end', () => {
-      stream.off('data', onData);
-      resolve(Buffer.concat(chunks));
-    });
-  });
+function assertUpstream(target: string) {
+  let parsed: URL;
+  try {
+    parsed = new URL(target);
+  } catch {
+    throw new Error('invalid upstream url');
+  }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+    throw new Error(`unsupported upstream protocol ${parsed.protocol}`);
+  }
+  const host = parsed.hostname;
+  if (
+    host === 'localhost' ||
+    host.endsWith('.localhost') ||
+    host === '127.0.0.1' ||
+    host === '::1' ||
+    host === '0.0.0.0'
+  ) {
+    throw new Error('localhost upstream not allowed');
+  }
 }
 
-function hostAllowed(profile: ServerProfile, target: string) {
-  const host = new URL(target).hostname;
-  if (profile.hosts.some((item) => host === item || host.endsWith(`.${item}`))) return true;
-  const path = new URL(target).pathname;
-  return Boolean(profile.segmentPathIncludes?.some((part) => path.includes(part)));
-}
-
-function segmentContentType(
-  profile: ServerProfile,
-  upstream: string | undefined,
-  target: string,
-  prefix?: Buffer,
-) {
-  if (prefix?.length && prefix[0] === 0x47) return 'video/mp2t';
+function segmentContentType(profile: ServerProfile, upstream: string | undefined, target: string) {
   if (profile.segmentType) return profile.segmentType;
   if (upstream) return upstream;
   const path = new URL(target).pathname.toLowerCase();
@@ -198,21 +189,24 @@ function writePlaylist(res: ServerResponse, text: string) {
   res.end(text);
 }
 
-function writeSegmentHeaders(
+function writeSegmentHead(
   res: ServerResponse,
   status: number,
-  profile: ServerProfile,
-  up: IncomingMessage,
-  target: string,
-  prefix?: Buffer,
+  type: string,
+  up: IncomingMessage | null,
+  length?: number,
 ) {
   const out: Record<string, string> = {
     ...cors,
-    'content-type': segmentContentType(profile, up.headers['content-type'], target, prefix),
-    'cache-control': String(up.headers['cache-control'] || 'public, max-age=60'),
+    'content-type': type,
+    'cache-control': String(up?.headers['cache-control'] || 'public, max-age=60'),
   };
-  for (const name of ['content-length', 'content-range', 'accept-ranges'] as const) {
-    if (up.headers[name]) out[name] = String(up.headers[name]);
+  if (up) {
+    for (const name of ['content-length', 'content-range', 'accept-ranges'] as const) {
+      if (up.headers[name]) out[name] = String(up.headers[name]);
+    }
+  } else if (length !== undefined) {
+    out['content-length'] = String(length);
   }
   if (!out['accept-ranges'] && status === 200) out['accept-ranges'] = 'bytes';
   res.writeHead(status, out);
@@ -225,55 +219,86 @@ async function serveProxyHls(
   origin: string,
   profile: ServerProfile,
 ) {
-  if (!hostAllowed(profile, target)) {
-    throw new Error(`host ${new URL(target).hostname} not allowed for ${profile.name}`);
-  }
+  assertUpstream(target);
 
   const pathLooksPlaylist = new URL(target).pathname.toLowerCase().endsWith('.m3u8');
-  const headers: Record<string, string> = {
-    ...profile.headers,
-    accept: '*/*',
-    'accept-encoding': 'identity',
-  };
-  if (req.headers.range && !pathLooksPlaylist) headers.range = String(req.headers.range);
+  const range = req.headers.range && !pathLooksPlaylist ? String(req.headers.range) : '';
+  const cacheable = !pathLooksPlaylist && !range;
 
-  const up = await onceUpstream(target, headers);
-  req.on('close', () => up.destroy());
-
-  if (!up.statusCode || up.statusCode >= 400) {
-    const errBody = await readBuffer(up);
-    throw new Error(`upstream ${up.statusCode}: ${errBody.subarray(0, 120).toString('utf8')}`);
+  if (cacheable) {
+    const hit = cacheGet(target);
+    if (hit) {
+      writeSegmentHead(res, 200, hit.type, null, hit.body.length);
+      res.end(hit.body);
+      return;
+    }
   }
 
-  const upstreamType = up.headers['content-type'];
+  const headers = withSiteReferer(
+    browserHeaders(range ? { range } : {}),
+  );
 
-  if (contentTypeIsPlaylist(upstreamType) || pathLooksPlaylist) {
-    const body = rewritePlaylist((await readBuffer(up)).toString('utf8'), target, origin, profile.name);
-    writePlaylist(res, body);
-    return;
-  }
-
-  const prefix = await readPrefix(up, 8);
-  if (prefix.toString('utf8').startsWith('#EXTM3U')) {
-    up.resume();
-    const rest = await readBuffer(up);
-    const body = rewritePlaylist(Buffer.concat([prefix, rest]).toString('utf8'), target, origin, profile.name);
-    writePlaylist(res, body);
-    return;
-  }
-
-  if (up.statusCode !== 200 && up.statusCode !== 206) {
-    up.resume();
-    throw new Error(`upstream ${up.statusCode}`);
-  }
-
-  writeSegmentHeaders(res, up.statusCode, profile, up, target, prefix);
-  res.write(prefix);
-  up.resume();
-  try {
-    await pipeline(up, res);
-  } catch {
+  const up = await onceUpstreamRetried(target, headers);
+  let closed = false;
+  const onClose = () => {
+    closed = true;
     up.destroy();
+  };
+  req.on('close', onClose);
+
+  try {
+    if (!up.statusCode || up.statusCode >= 400) {
+      const errBody = await readBuffer(up);
+      throw new Error(`upstream ${up.statusCode}: ${errBody.subarray(0, 120).toString('utf8')}`);
+    }
+
+    const upstreamType = up.headers['content-type'];
+
+    if (contentTypeIsPlaylist(upstreamType) || pathLooksPlaylist) {
+      const body = rewritePlaylist((await readBuffer(up)).toString('utf8'), target, origin, profile.name);
+      writePlaylist(res, body);
+      return;
+    }
+
+    const type = segmentContentType(profile, upstreamType, target);
+
+    if (up.statusCode !== 200 && up.statusCode !== 206) {
+      up.resume();
+      throw new Error(`upstream ${up.statusCode}`);
+    }
+
+    writeSegmentHead(res, up.statusCode, type, up);
+
+    if (!cacheable || up.statusCode !== 200) {
+      try {
+        await pipeline(up, res);
+      } catch {
+        up.destroy();
+      }
+      return;
+    }
+
+    const chunks: Buffer[] = [];
+    try {
+      await new Promise<void>((resolve, reject) => {
+        up.on('data', (chunk: Buffer) => {
+          chunks.push(chunk);
+          if (!res.write(chunk)) up.pause();
+        });
+        res.on('drain', () => up.resume());
+        up.on('end', () => {
+          res.end();
+          if (!closed) cacheSet(target, Buffer.concat(chunks), type);
+          resolve();
+        });
+        up.on('error', reject);
+        res.on('error', reject);
+      });
+    } catch {
+      up.destroy();
+    }
+  } finally {
+    req.off('close', onClose);
   }
 }
 
@@ -284,59 +309,35 @@ function resolveProxyProfile(name: string): ServerProfile {
   return profile;
 }
 
-function parseTokenPath(pathname: string, kind: 'hls' | 'playlist'): { server: string; url: string } | null {
-  const match = pathname.match(new RegExp(`^/api/${kind}/([^/]+)/([^/]+)$`));
+export function parseProxyPath(pathname: string): { server: string; url: string } | null {
+  const match = pathname.match(/^\/api\/hls\/([^/]+)\/([^/]+)$/);
   if (!match) return null;
   const server = decodeURIComponent(match[1]!);
-  const token = match[2]!;
-  const url = resolveProxyId(token) ?? decodeLegacyTarget(token);
+  const url = resolveProxyId(match[2]!);
   if (!url) return null;
   return { server, url };
-}
-
-export function parseProxyPath(pathname: string): { server: string; url: string } | null {
-  return parseTokenPath(pathname, 'hls');
-}
-
-export function parsePlaylistPath(pathname: string): { server: string; url: string } | null {
-  return parseTokenPath(pathname, 'playlist');
 }
 
 export function playbackForServer(origin: string, url: string, name: string) {
   const profile = profileByName(name);
   if (!profile) throw new Error(`unknown server: ${name}`);
   const id = profile.needsProxy ? mintProxyId(url) : null;
+  const wantUa = profile.cli ? Boolean(profile.cli.userAgent) : profile.refererRequired;
   return {
     url,
     proxy: profile.needsProxy,
     play: id ? `${origin}/api/hls/${encodeURIComponent(profile.name)}/${id}` : null,
-    external:
-      profile.directSegments && id
-        ? `${origin}/api/playlist/${encodeURIComponent(profile.name)}/${id}`
-        : null,
     referer: profile.refererRequired,
-    directPlayable: profile.directPlayable,
+    refererUrl: profile.refererRequired ? siteReferer : null,
+    userAgent: wantUa ? userAgent : null,
+    cli: profile.cli
+      ? {
+          vlcArgs: [...(profile.cli.vlcArgs ?? [])],
+          mpvArgs: [...(profile.cli.mpvArgs ?? [])],
+          mediaTitle: profile.cli.mediaTitle !== false,
+        }
+      : null,
   };
-}
-
-async function serveDirectPlaylist(res: ServerResponse, target: string, profile: ServerProfile) {
-  if (!hostAllowed(profile, target)) {
-    throw new Error(`host ${new URL(target).hostname} not allowed for ${profile.name}`);
-  }
-
-  const up = await onceUpstream(target, {
-    ...profile.headers,
-    accept: '*/*',
-    'accept-encoding': 'identity',
-  });
-  if (!up.statusCode || up.statusCode >= 400) {
-    const errBody = await readBuffer(up);
-    throw new Error(`upstream ${up.statusCode}: ${errBody.subarray(0, 120).toString('utf8')}`);
-  }
-
-  const raw = (await readBuffer(up)).toString('utf8');
-  if (!raw.includes('#EXTM3U')) throw new Error('upstream not a playlist');
-  writePlaylist(res, absolutizePlaylist(raw, target));
 }
 
 export async function serveProxyRequest(
@@ -356,34 +357,6 @@ export async function serveProxyRequest(
 
   try {
     await serveProxyHls(req, res, params.url, origin, profile);
-  } catch (err) {
-    if (!res.headersSent) {
-      res.writeHead(502, { 'Content-Type': 'text/plain' });
-      res.end(String((err as Error).message || err));
-    }
-  }
-}
-
-export async function servePlaylistRequest(
-  res: ServerResponse,
-  params: { url: string; server: string },
-) {
-  let profile: ServerProfile;
-  try {
-    profile = resolveProxyProfile(params.server);
-  } catch (err) {
-    res.writeHead(400, { 'Content-Type': 'text/plain' });
-    res.end((err as Error).message);
-    return;
-  }
-  if (!profile.directSegments) {
-    res.writeHead(400, { 'Content-Type': 'text/plain' });
-    res.end(`${profile.name} does not expose direct segments`);
-    return;
-  }
-
-  try {
-    await serveDirectPlaylist(res, params.url, profile);
   } catch (err) {
     if (!res.headersSent) {
       res.writeHead(502, { 'Content-Type': 'text/plain' });

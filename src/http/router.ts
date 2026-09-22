@@ -1,10 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import {
-  parsePlaylistPath,
-  parseProxyPath,
-  servePlaylistRequest,
-  serveProxyRequest,
-} from '../proxy/hls.js';
+import { parseProxyPath, serveProxyRequest } from '../proxy/hls.js';
 import { parseResolveRequest } from '../resolver/request.js';
 import { resolvePlayback } from '../resolver/pipeline.js';
 import { serveStatic } from './static.js';
@@ -49,17 +44,6 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         return;
       }
       await serveProxyRequest(req, res, parsed, origin);
-      return;
-    }
-
-    if (pathname === '/api/playlist' || pathname.startsWith('/api/playlist/')) {
-      const parsed = pathname === '/api/playlist' ? null : parsePlaylistPath(pathname);
-      if (!parsed) {
-        res.writeHead(400, { 'Content-Type': 'text/plain' });
-        res.end('use /api/playlist/{server}/{id}');
-        return;
-      }
-      await servePlaylistRequest(res, parsed);
       return;
     }
 

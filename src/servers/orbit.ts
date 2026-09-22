@@ -1,13 +1,13 @@
-import { type ServerProfile, vidcoreHeaders } from './types.js';
+import type { ServerProfile } from './types.js';
 
 export const orbit: ServerProfile = {
   name: 'Orbit',
-  hosts: ['moon.clearvault.top', 'moon.peakstorm.top'],
   needsProxy: true,
-  directPlayable: false,
   refererRequired: true,
   abrMaster: false,
-  directSegments: true,
   segmentType: 'video/mp2t',
-  headers: { ...vidcoreHeaders },
+  cli: {
+    mpvArgs: ['--stream-lavf-o=seekable=0'],
+    mediaTitle: false,
+  },
 };

@@ -58,7 +58,7 @@ async function unlockServerEvent(
     const profile = profileByName(server.name);
     let url = config.url;
     if (profile?.abrMaster) {
-      url = await ensureMasterForAbr(url, profile.headers);
+      url = await ensureMasterForAbr(url);
     }
     return {
       event: 'server' as const,

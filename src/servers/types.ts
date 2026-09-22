@@ -1,19 +1,15 @@
-import { siteReferer, userAgent } from '../config.js';
+export type ServerCli = {
+  userAgent?: boolean;
+  vlcArgs?: readonly string[];
+  mpvArgs?: readonly string[];
+  mediaTitle?: boolean;
+};
 
 export type ServerProfile = {
   name: string;
-  hosts: readonly string[];
   needsProxy: boolean;
-  directPlayable: boolean;
   refererRequired: boolean;
   abrMaster: boolean;
-  directSegments?: boolean;
   segmentType?: string;
-  segmentPathIncludes?: readonly string[];
-  headers: Record<string, string>;
-};
-
-export const vidcoreHeaders: Record<string, string> = {
-  Referer: siteReferer,
-  'User-Agent': userAgent,
+  cli?: ServerCli;
 };

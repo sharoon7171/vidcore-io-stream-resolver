@@ -1,5 +1,7 @@
+import { browserHeaders, fetchWithSiteReferer } from '../http/upstream.js';
+
 async function playlistText(url: string, headers: Record<string, string>) {
-  const res = await fetch(url, { headers });
+  const res = await fetchWithSiteReferer(url, headers);
   if (!res.ok) throw new Error(`playlist ${res.status}`);
   return res.text();
 }
@@ -12,7 +14,7 @@ function masterSibling(url: string) {
   return parsed.href;
 }
 
-export async function ensureMasterForAbr(url: string, headers: Record<string, string>) {
+export async function ensureMasterForAbr(url: string, headers: Record<string, string> = browserHeaders()) {
   const text = await playlistText(url, headers);
   if (text.includes('#EXT-X-STREAM-INF:')) return url;
 
